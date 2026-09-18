@@ -1,0 +1,48 @@
+# policies.yaml
+# ---------------
+# Zero-Trust ABAC policies for the XZT-IIoT self-hardening module.
+# These start deliberately permissive/naive (Cycle 0) so the hardening
+# loop has real weaknesses to find and close -- we do not hand-tune
+# Cycle 0 to already be secure, or there is nothing to measure.
+
+version: 1
+
+policies:
+  - policy_id: ZT-PLC-001
+    resource: PLC_CONTROLLER
+    action: WRITE_SETPOINT
+    conditions:
+      allowed_roles: [engineer, maintenance]
+      min_trust_score: 0.60
+      min_device_integrity: 0.60
+      max_anomaly_score: 0.70
+      allowed_network_zones: [engineering, maintenance]
+      require_step_up_if_zone_mismatch: false
+    decision_if_match: ALLOW
+    decision_if_no_match: DENY
+
+  - policy_id: ZT-HMI-002
+    resource: HMI_WORKSTATION
+    action: READ_STATUS
+    conditions:
+      allowed_roles: [engineer, operator, maintenance]
+      min_trust_score: 0.40
+      min_device_integrity: 0.50
+      max_anomaly_score: 0.80
+      allowed_network_zones: [engineering, operations, maintenance]
+      require_step_up_if_zone_mismatch: false
+    decision_if_match: ALLOW
+    decision_if_no_match: DENY
+
+  - policy_id: ZT-PUMP-003
+    resource: PUMP_CONTROLLER
+    action: START_STOP
+    conditions:
+      allowed_roles: [operator, engineer]
+      min_trust_score: 0.55
+      min_device_integrity: 0.60
+      max_anomaly_score: 0.65
+      allowed_network_zones: [operations, engineering]
+      require_step_up_if_zone_mismatch: false
+    decision_if_match: ALLOW
+    decision_if_no_match: DENY

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>XZT-IIoT — Zero-Trust Control Dashboard</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --border:#30363d; --text:#e6edf3;
+          --muted:#8b949e; --green:#3fb950; --red:#f85149; --amber:#d29922; --blue:#58a6ff; }
+  * { box-sizing: border-box; }
+  body { background:var(--bg); color:var(--text); font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+         margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px,1fr)); gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; overflow-x:auto; }
+  .card h2 { font-size:14px; margin:0 0 12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:500; }
+  .badge { padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+  .ALLOW { background:rgba(63,185,80,.15); color:var(--green); }
+  .DENY { background:rgba(248,81,73,.15); color:var(--red); }
+  .STEP_UP_AUTH { background:rgba(210,153,34,.15); color:var(--amber); }
+  .QUARANTINE { background:rgba(248,81,73,.3); color:var(--red); }
+  button { background:var(--blue); color:#fff; border:none; border-radius:6px; padding:8px 14px;
+           font-size:13px; cursor:pointer; margin-right:8px; }
+  button:hover { opacity:.85; }
+  .metric { display:flex; justify-content:space-between; padding:4px 0; font-size:13px; }
+  .metric b { color:var(--blue); }
+  #log { max-height:260px; overflow-y:auto; }
+  .footer { color:var(--muted); font-size:11px; margin-top:24px; }
+</style>
+</head>
+<body>
+  <h1>🛡️ XZT-IIoT — Zero-Trust Control Dashboard</h1>
+  <div class="sub">Explainable Self-Adaptive Zero-Trust Access Control for Industrial IoT — live API demo</div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Try a live access decision</h2>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">
+        <select id="preset">
+          <option value="good">Legitimate engineer, PLC write</option>
+          <option value="badrole">Wrong role (operator on PLC)</option>
+          <option value="lowintegrity">Compromised device (low integrity)</option>
+          <option value="anomaly">High behavioral anomaly</option>
+        </select>
+      </div>
+      <button onclick="sendAuthRequest()">Evaluate Request</button>
+      <div id="decisionResult" style="margin-top:12px; font-size:13px;"></div>
+    </div>
+
+    <div class="card" style="grid-column: span 2;">
+      <h2>Active Zero-Trust Policies</h2>
+      <table id="policiesTable"><thead><tr><th>Policy</th><th>Resource</th>
+        <th>min_trust</th><th>min_integrity</th><th>max_anomaly</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>Run Self-Hardening Experiment</h2>
+      <label style="font-size:12px; color:var(--muted); display:block; margin-bottom:8px;">
+        <input type="checkbox" id="evoCheckbox" checked> Evolutionary Red Agent (fresh worst-case search each run)
+      </label>
+      <button onclick="runExperiment()">Run 5-Cycle Hardening Loop</button>
+      <div style="position:relative; height:220px; margin-top:12px; display:none;" id="chartWrap">
+        <canvas id="asrChart"></canvas>
+      </div>
+      <div id="expResult" style="margin-top:8px; font-size:12px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Live Decision Log</h2>
+      <div id="log"><table id="logTable"><thead><tr><th>Subject</th><th>Resource</th>
+        <th>Decision</th><th>Trust</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Latency Metrics (real, measured)</h2>
+      <button onclick="loadMetrics()">Measure Now</button>
+      <div id="metricsResult" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card" style="grid-column: span 2;">
+      <h2>Trend Over Time (Scheduled/Triggered Runs)</h2>
+      <button onclick="triggerLiveIntel()">Trigger Run (real NVD threat data)</button>
+      <button onclick="loadTrend()">Refresh Trend</button>
+      <div style="position:relative; height:200px; margin-top:12px;" id="trendWrap">
+        <canvas id="trendChart"></canvas>
+      </div>
+      <div id="trendResult" style="margin-top:8px; font-size:12px; color:var(--muted);"></div>
+    </div>
+
+    <div class="card">
+      <h2>Device Fleet</h2>
+      <button onclick="loadDevices()">Load Fleet</button>
+      <table id="devicesTable"><thead><tr><th>ID</th><th>Type</th><th>Zone</th><th>Integrity</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="footer">XZT-IIoT research prototype — FastAPI + SQLite, no Docker/Postgres/MQTT (unavailable in dev sandbox).</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+let asrChart = null;
+const presets = {
+  good: {subject_id:"eng_01", role:"engineer", device_id:"laptop_04", resource:"PLC_CONTROLLER",
+         action:"WRITE_SETPOINT", network_zone:"engineering", identity_confidence:0.95,
+         authentication_strength:0.95, device_integrity:0.95, behavioral_trust:0.9, anomaly_score:0.05, access_hour:14},
+  badrole: {subject_id:"op_01", role:"operator", device_id:"laptop_05", resource:"PLC_CONTROLLER",
+         action:"WRITE_SETPOINT", network_zone:"engineering", identity_confidence:0.9,
+         authentication_strength:0.9, device_integrity:0.9, behavioral_trust:0.9, anomaly_score:0.05, access_hour:14},
+  lowintegrity: {subject_id:"eng_02", role:"engineer", device_id:"laptop_06", resource:"PLC_CONTROLLER",
+         action:"WRITE_SETPOINT", network_zone:"engineering", identity_confidence:0.9,
+         authentication_strength:0.9, device_integrity:0.15, behavioral_trust:0.8, anomaly_score:0.3, access_hour:14},
+  anomaly: {subject_id:"eng_03", role:"engineer", device_id:"laptop_07", resource:"PLC_CONTROLLER",
+         action:"WRITE_SETPOINT", network_zone:"engineering", identity_confidence:0.9,
+         authentication_strength:0.9, device_integrity:0.9, behavioral_trust:0.2, anomaly_score:0.75, access_hour:14},
+};
+
+async function sendAuthRequest() {
+  const body = presets[document.getElementById('preset').value];
+  const res = await fetch('/auth/request', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const data = await res.json();
+  document.getElementById('decisionResult').innerHTML =
+    `<span class="badge ${data.decision}">${data.decision}</span> trust=${data.trust_score.toFixed(3)}<br>
+     <span style="color:#8b949e">${data.explanation}</span>`;
+  loadDecisions();
+}
+
+async function loadPolicies() {
+  const res = await fetch('/policies'); const data = await res.json();
+  const tbody = document.querySelector('#policiesTable tbody'); tbody.innerHTML = '';
+  data.forEach(p => { tbody.innerHTML += `<tr><td>${p.policy_id}</td><td>${p.resource}</td>
+    <td>${p.min_trust_score}</td><td>${p.min_device_integrity}</td><td>${p.max_anomaly_score}</td></tr>`; });
+}
+
+async function loadDecisions() {
+  const res = await fetch('/auth/decisions?limit=15'); const data = await res.json();
+  const tbody = document.querySelector('#logTable tbody'); tbody.innerHTML = '';
+  data.forEach(d => { tbody.innerHTML += `<tr><td>${d.subject_id}</td><td>${d.resource}</td>
+    <td><span class="badge ${d.decision}">${d.decision}</span></td><td>${d.trust_score.toFixed(2)}</td></tr>`; });
+}
+
+async function runExperiment() {
+  document.getElementById('expResult').innerText = 'Running 5-cycle hardening loop...';
+  const evo = document.getElementById('evoCheckbox').checked;
+  const res = await fetch(`/experiments/run?seed=42&evolutionary=${evo}`, {method:'POST'});
+  const data = await res.json();
+
+  const labels = data.cycle_results.map(c => 'Cycle ' + c.cycle);
+  const asr = data.cycle_results.map(c => +(c.asr*100).toFixed(1));
+  const nwfsr = data.cycle_results.map(c => +(c.nwfsr*100).toFixed(1));
+
+  document.getElementById('chartWrap').style.display = 'block';
+  const canvas = document.getElementById('asrChart');
+  if (asrChart) asrChart.destroy();
+  asrChart = new Chart(canvas, {
+    type: 'line',
+    data: { labels: labels, datasets: [
+      { label: 'Attack Success Rate (%)', data: asr, borderColor: '#f85149',
+        backgroundColor: 'rgba(248,81,73,.15)', fill: true, tension: .25 },
+      { label: 'Normal Workflow Success Rate (%)', data: nwfsr, borderColor: '#3fb950',
+        backgroundColor: 'rgba(63,185,80,.15)', fill: true, tension: .25 },
+    ]},
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { min: 0, max: 105, ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+        x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } }
+      },
+      plugins: { legend: { labels: { color: '#e6edf3', font: { size: 11 } } } }
+    }
+  });
+
+  document.getElementById('expResult').innerHTML =
+    `Audit valid: <b>${data.audit_valid}</b> (${data.audit_blocks} blocks)`;
+}
+
+async function loadMetrics() {
+  const res = await fetch('/metrics'); const data = await res.json();
+  document.getElementById('metricsResult').innerHTML =
+    `<div class="metric">p50 latency <b>${data.p50_ms} ms</b></div>
+     <div class="metric">p95 latency <b>${data.p95_ms} ms</b></div>
+     <div class="metric">p99 latency <b>${data.p99_ms} ms</b></div>
+     <div class="metric">throughput <b>${data.throughput_req_per_sec.toLocaleString()} req/s</b></div>`;
+}
+
+async function loadDevices() {
+  const res = await fetch('/devices'); const data = await res.json();
+  const tbody = document.querySelector('#devicesTable tbody'); tbody.innerHTML = '';
+  data.forEach(d => { tbody.innerHTML += `<tr><td>${d.device_id}</td><td>${d.device_type}</td>
+    <td>${d.network_zone}</td><td>${d.integrity_score}</td></tr>`; });
+}
+
+let trendChart = null;
+async function loadTrend() {
+  const res = await fetch('/experiments/history?limit=50');
+  const data = await res.json();
+  if (!data.length) {
+    document.getElementById('trendResult').innerText =
+      'No scheduled/triggered runs yet. Click "Trigger Run" to add the first data point.';
+    return;
+  }
+  const labels = data.map(e => new Date(e.timestamp).toLocaleString());
+  const asr = data.map(e => +(e.final_asr * 100).toFixed(1));
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: { labels: labels, datasets: [
+      { label: 'Final ASR per run (%)', data: asr, borderColor: '#58a6ff',
+        backgroundColor: 'rgba(88,166,255,.15)', fill: true, tension: .2 } ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { y: { min: 0, ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+                x: { ticks: { color: '#8b949e', maxRotation: 0 }, grid: { color: '#30363d' } } },
+      plugins: { legend: { labels: { color: '#e6edf3', font: { size: 11 } } } } }
+  });
+  document.getElementById('trendResult').innerText = `${data.length} run(s) recorded.`;
+}
+
+async function triggerLiveIntel() {
+  document.getElementById('trendResult').innerText = 'Running triggered hardening cycle...';
+  const res = await fetch('/experiments/trigger?reason=NEW_THREAT', {method:'POST'});
+  await res.json();
+  loadTrend();
+}
+
+loadTrend();
+
+loadPolicies(); loadDecisions();
+</script>
+</body>
+</html>

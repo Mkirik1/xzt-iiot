@@ -1,0 +1,6 @@
+Experiment,Zero-Trust,Dynamic Trust,Explainability,Blockchain Audit,Adaptive AI,ASR,NWFSR
+Experiment A (Baseline ABAC),No,No,No,No,No,0.7,1.0
+Experiment B (Zero-Trust ABAC),Yes,Yes,No,No,No,0.3438,1.0
+Experiment C (ZT + Explainability),Yes,Yes,Yes,No,No,0.3438,1.0
+Experiment D (ZT + Blockchain),Yes,Yes,No,Yes,No,0.3438,1.0
+Experiment E (Full XZT-IIoT),Yes,Yes,Yes,Yes,Yes,0.1533±0.0178,1.0

@@ -1,0 +1,24 @@
+# Datasets (too large for git, and Edge-IIoTset requires its own license
+# acceptance on Kaggle/IEEE DataPort — do not redistribute it here)
+data/*.csv
+
+# Generated results and figures are reproducible via run_all.py —
+# keep the repo lean, don't commit generated artifacts
+results/*.json
+results/*.csv
+results/*.joblib
+results/*.db
+self_hardening/results/*.json
+self_hardening/results/*.yaml
+self_hardening/config/schedule.yaml
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+.vscode/
+*.log

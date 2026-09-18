@@ -1,0 +1,49 @@
+"""
+test_adversarial_evasion.py
+-------------------------------
+Sanity checks for the evasion search: perturbed features never exceed
+the bounds actually observed in real data (the stated threat model),
+and the search never decreases confidence by accident (hill-climbing
+correctness).
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+import numpy as np
+import pytest
+
+from adversarial_evasion import (compute_feature_bounds, evasion_search,
+                                  load_model, predict_p_malicious)
+from train_trust_model import load_and_encode, DATA_PATH
+
+
+@pytest.fixture(scope="module")
+def setup():
+    model, feature_cols = load_model()
+    df, _, _ = load_and_encode(DATA_PATH)
+    bounds = compute_feature_bounds(df, feature_cols)
+    return model, feature_cols, df, bounds
+
+
+def test_perturbed_features_stay_within_observed_bounds(setup):
+    model, feature_cols, df, bounds = setup
+    rng = np.random.default_rng(123)
+    row = df[df.label_binary == 1].iloc[0][feature_cols].to_dict()
+    adv, _, _ = evasion_search(model, feature_cols, bounds, row, rng, max_iters=30)
+    for f in feature_cols:
+        lo, hi, _ = bounds[f]
+        assert lo - 1e-6 <= adv[f] <= hi + 1e-6, f"{f} escaped observed bounds: {adv[f]} not in [{lo},{hi}]"
+
+
+def test_hill_climbing_never_gets_worse(setup):
+    model, feature_cols, df, bounds = setup
+    rng = np.random.default_rng(5)
+    row = df[df.label_binary == 1].iloc[10][feature_cols].to_dict()
+    orig_p = predict_p_malicious(model, feature_cols, row)
+    adv, adv_p, history = evasion_search(model, feature_cols, bounds, row, rng, max_iters=40)
+    assert adv_p <= orig_p + 1e-9
+    # history should be non-increasing (we only ever keep improvements)
+    assert all(history[i] >= history[i + 1] - 1e-9 for i in range(len(history) - 1))

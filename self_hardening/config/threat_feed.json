@@ -1,0 +1,39 @@
+{
+  "threats": [
+    {
+      "threat_id": "T-001",
+      "title": "Credential stuffing campaign reported against industrial VPN gateways",
+      "attack_category": "stolen_credentials",
+      "severity": "high",
+      "source": "local_fixture"
+    },
+    {
+      "threat_id": "T-002",
+      "title": "Firmware tampering reported in third-party PLC modules",
+      "attack_category": "compromised_device",
+      "severity": "medium",
+      "source": "local_fixture"
+    },
+    {
+      "threat_id": "T-003",
+      "title": "Lateral movement enabled by inconsistent network segmentation",
+      "attack_category": "network_zone_mismatch",
+      "severity": "medium",
+      "source": "local_fixture"
+    },
+    {
+      "threat_id": "T-004",
+      "title": "Anomalous off-hours access patterns linked to insider-threat activity",
+      "attack_category": "abnormal_access_time",
+      "severity": "high",
+      "source": "local_fixture"
+    },
+    {
+      "threat_id": "T-005",
+      "title": "Behavioral drift consistent with session hijacking",
+      "attack_category": "behavioral_anomaly",
+      "severity": "medium",
+      "source": "local_fixture"
+    }
+  ]
+}

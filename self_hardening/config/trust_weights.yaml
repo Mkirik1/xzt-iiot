@@ -1,0 +1,13 @@
+# trust_weights.yaml
+# --------------------
+# Weighted linear TrustScore formula. All weights configurable,
+# never hardcoded in Python. The Blue Agent is allowed to adjust
+# these (specifically w_anomaly) as one class of mitigation.
+
+weights:
+  identity_confidence: 0.25
+  device_integrity: 0.20
+  behavioral_trust: 0.20
+  network_trust: 0.15
+  authentication_strength: 0.20
+  anomaly_risk: 0.35   # subtracted, not added -- see trust_engine.py
