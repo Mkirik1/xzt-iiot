@@ -27,3 +27,7 @@ __pycache__/
 hardware/gateway/enrolled_firmware.yaml
 hardware/gateway/audit_chain.json
 hardware/gateway/passwords.txt
+# Wokwi projects are generated per user prefix by hardware/wokwi/make_wokwi.py
+hardware/wokwi/sensor/
+hardware/wokwi/actuator/
+hardware/wokwi/attacker/

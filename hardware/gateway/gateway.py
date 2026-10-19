@@ -188,6 +188,7 @@ def main():
     ap.add_argument("--port", type=int, default=1883)
     ap.add_argument("--enroll", action="store_true", help="record firmware hashes of devices with a valid token")
     ap.add_argument("--demo-hour", type=int, default=None, help="pretend the local hour is this value")
+    ap.add_argument("--prefix", default="xzt", help="topic prefix; must match PREFIX in the ESP32 sketch")
     ap.add_argument("--user", default="", help="MQTT username (with mosquitto-acl.conf: xzt-gateway)")
     ap.add_argument("--password", default="", help="MQTT password")
     args = ap.parse_args()
@@ -197,12 +198,15 @@ def main():
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         print(f"Connected to broker {args.broker}:{args.port} ({reason_code})")
-        client.subscribe("xzt/req/+")
-        client.subscribe("xzt/tel/+")
+        client.subscribe(f"{args.prefix}/req/+")
+        client.subscribe(f"{args.prefix}/tel/+")
 
     def on_message(client, userdata, m):
         now = time.time()
-        kind, device_id = m.topic.split("/")[1], m.topic.split("/")[2]
+        parts = m.topic.split("/")
+        if len(parts) != 3:
+            return
+        kind, device_id = parts[1], parts[2]
         gw.note_message(device_id, now)
         if kind != "req":
             return
@@ -211,13 +215,13 @@ def main():
         except (ValueError, UnicodeDecodeError):
             msg = {}
         out = gw.decide(device_id, msg, now)
-        client.publish(f"xzt/decision/{device_id}", json.dumps(out))
+        client.publish(f"{args.prefix}/decision/{device_id}", json.dumps(out))
         if out["decision"] == "ALLOW" and msg.get("resource") == "PUMP_CONTROLLER":
-            client.publish("xzt/cmd/pump", json.dumps({"state": out["state"]}))
+            client.publish(f"{args.prefix}/cmd/pump", json.dumps({"state": out["state"]}))
         print(f"{time.strftime('%H:%M:%S')} {device_id:16s} {out['decision']:13s} "
               f"trust={out['trust']:.2f}  {out['checks']}  {out['why'][:70]}")
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="xzt-gateway")
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"{args.prefix}-gateway")
     client.on_connect = on_connect
     client.on_message = on_message
     if args.user:

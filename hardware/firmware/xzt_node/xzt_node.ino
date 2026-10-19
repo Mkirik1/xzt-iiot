@@ -4,7 +4,7 @@
 
   ROLE_SENSOR    DS18B20 temperature -> telemetry every 2 s.
                  Button A asks the gateway to turn the pump ON, button B OFF.
-  ROLE_ACTUATOR  Relay drives the pump. Obeys ONLY xzt/cmd/pump (which only
+  ROLE_ACTUATOR  Relay drives the pump. Obeys ONLY <prefix>/cmd/pump (which only
                  the gateway should be allowed to publish; see mosquitto-acl.conf).
                  Green / yellow / red LEDs + buzzer show the gateway's decisions.
   ROLE_ATTACKER  Five buttons, each one test scenario against the gateway.
@@ -28,8 +28,12 @@
 
 const char* WIFI_SSID   = "XZT-LAB";            // phone hotspot / lab router
 const char* WIFI_PASS   = "change-me";
-const char* BROKER_IP   = "192.168.43.100";     // laptop IP on that network
+const char* BROKER_IP   = "192.168.43.100";     // laptop IP on that network (or a host name)
 const int   BROKER_PORT = 1883;
+// Topic prefix. "xzt" on your own broker. On a PUBLIC broker (Wokwi
+// simulation) use something unique, e.g. "xzt-kirik-7341", and pass the
+// same value to the gateway with --prefix.
+const char* PREFIX      = "xzt";
 const char* MQTT_USER   = "";                    // only with mosquitto-acl.conf
 const char* MQTT_PASS   = "";
 
@@ -55,8 +59,12 @@ const char* SENSOR_FW_MD5_COPY = "paste-sensor-md5-here";
 #elif ROLE == ROLE_ACTUATOR
   const char* DEVICE_ID = "esp32_actuator";
   const int PIN_RELAY = 23;
-  const bool RELAY_ACTIVE_LOW = true;   // most cheap relay modules; set false if inverted
+  // Use a relay module whose trigger jumper is set to HIGH (or a 3.3 V
+  // module): then HIGH = on and this stays false. Set true only for a
+  // low-level-trigger module that switches reliably from 3.3 V.
+  const bool RELAY_ACTIVE_LOW = false;
   const int PIN_GREEN = 25, PIN_YELLOW = 26, PIN_RED = 27, PIN_BUZZER = 14;  // LEDs via 220 ohm
+  const bool BUZZER_ACTIVE_LOW = false;  // some 3-pin buzzer modules sound on LOW: set true then
 #else
   const char* DEVICE_ID = "esp32_attacker";
   const int BTN[5] = {18, 19, 32, 33, 13};   // scenarios A..E, to GND
@@ -86,7 +94,7 @@ void sendRequest(const char* asDevice, const char* token, const char* fw, const 
   doc["fw_md5"] = fw;
   char buf[256];
   serializeJson(doc, buf);
-  String topic = String("xzt/req/") + asDevice;
+  String topic = String(PREFIX) + "/req/" + asDevice;
   mqtt.publish(topic.c_str(), buf);
   Serial.printf("-> %s %s\n", topic.c_str(), buf);
 }
@@ -98,12 +106,16 @@ void setPump(bool on) {
   Serial.printf("PUMP %s\n", on ? "ON" : "OFF");
 }
 
+void buzz(bool on) { digitalWrite(PIN_BUZZER, (on ^ BUZZER_ACTIVE_LOW) ? HIGH : LOW); }
+
 void showDecision(const char* d) {
   digitalWrite(PIN_GREEN, LOW); digitalWrite(PIN_YELLOW, LOW); digitalWrite(PIN_RED, LOW);
   if (!strcmp(d, "ALLOW")) digitalWrite(PIN_GREEN, HIGH);
   else if (!strcmp(d, "STEP_UP_AUTH")) digitalWrite(PIN_YELLOW, HIGH);
   else digitalWrite(PIN_RED, HIGH);
-  if (!strcmp(d, "QUARANTINE")) { for (int i = 0; i < 3; i++) { digitalWrite(PIN_BUZZER, HIGH); delay(150); digitalWrite(PIN_BUZZER, LOW); delay(100); } }
+  if (!strcmp(d, "QUARANTINE")) {
+    for (int i = 0; i < 3; i++) { buzz(true); delay(150); buzz(false); delay(100); }
+  }
 }
 #endif
 
@@ -112,10 +124,10 @@ void onMessage(char* topic, byte* payload, unsigned int len) {
   if (deserializeJson(doc, payload, len)) return;
   String t(topic);
 #if ROLE == ROLE_ACTUATOR
-  if (t == "xzt/cmd/pump") {
+  if (t == String(PREFIX) + "/cmd/pump") {
     const char* st = doc["state"] | "toggle";
     setPump(!strcmp(st, "on") ? true : !strcmp(st, "off") ? false : !pumpOn);
-  } else if (t.startsWith("xzt/decision/")) {
+  } else if (t.startsWith(String(PREFIX) + "/decision/")) {
     showDecision(doc["decision"] | "DENY");
   }
 #endif
@@ -128,14 +140,14 @@ void connectMqtt() {
     bool ok = strlen(MQTT_USER) ? mqtt.connect(DEVICE_ID, MQTT_USER, MQTT_PASS) : mqtt.connect(DEVICE_ID);
     if (ok) {
       Serial.println(" ok");
-      String mine = String("xzt/decision/") + DEVICE_ID;
+      String p(PREFIX);
 #if ROLE == ROLE_ACTUATOR
-      mqtt.subscribe("xzt/cmd/pump");
-      mqtt.subscribe("xzt/decision/#");
+      mqtt.subscribe((p + "/cmd/pump").c_str());
+      mqtt.subscribe((p + "/decision/#").c_str());
 #elif ROLE == ROLE_ATTACKER
-      mqtt.subscribe("xzt/decision/#");
+      mqtt.subscribe((p + "/decision/#").c_str());
 #else
-      mqtt.subscribe(mine.c_str());
+      mqtt.subscribe((p + "/decision/" + DEVICE_ID).c_str());
 #endif
     } else { Serial.printf(" failed rc=%d, retry\n", mqtt.state()); delay(2000); }
   }
@@ -156,7 +168,8 @@ void setup() {
   temps.begin();
 #elif ROLE == ROLE_ACTUATOR
   pinMode(PIN_RELAY, OUTPUT); setPump(false);
-  pinMode(PIN_GREEN, OUTPUT); pinMode(PIN_YELLOW, OUTPUT); pinMode(PIN_RED, OUTPUT); pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(PIN_GREEN, OUTPUT); pinMode(PIN_YELLOW, OUTPUT); pinMode(PIN_RED, OUTPUT);
+  pinMode(PIN_BUZZER, OUTPUT); buzz(false);
 #else
   for (int i = 0; i < 5; i++) pinMode(BTN[i], INPUT_PULLUP);
 #endif
@@ -180,7 +193,7 @@ void loop() {
     float c = temps.getTempCByIndex(0);
     char buf[96];
     snprintf(buf, sizeof(buf), "{\"temp_c\":%.2f,\"fw_md5\":\"%s\"}", c, fwMd5.c_str());
-    mqtt.publish("xzt/tel/esp32_sensor", buf);
+    mqtt.publish((String(PREFIX) + "/tel/esp32_sensor").c_str(), buf);
     blink(20);
   }
   if (pressed(PIN_BTN_A)) sendRequest(DEVICE_ID, SENSOR_TOKEN, fwMd5.c_str(), "on");
@@ -196,7 +209,7 @@ void loop() {
   if (pressed(BTN[2])) sendRequest("esp32_sensor", SENSOR_TOKEN, fwMd5.c_str(), "on");
   // D: bypass the gateway, command the pump directly   -> works with mosquitto-day1.conf,
   //    rejected by the broker with mosquitto-acl.conf
-  if (pressed(BTN[3])) { mqtt.publish("xzt/cmd/pump", "{\"state\":\"on\"}"); Serial.println("-> xzt/cmd/pump DIRECT"); }
+  if (pressed(BTN[3])) { mqtt.publish((String(PREFIX) + "/cmd/pump").c_str(), "{\"state\":\"on\"}"); Serial.println("-> cmd/pump DIRECT"); }
   // E: perfect impersonation (stolen token + copied fingerprint), flooding 60 requests.
   //    The first few look legitimate and pass; the rate anomaly then gets them DENIED.
   //    This also shows the limitation: a self-reported hash can be copied.
