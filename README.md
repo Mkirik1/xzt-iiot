@@ -27,6 +27,7 @@ Two independent, measured contributions:
 | + Adversarial training defense | Best-known evasion 100% → 55.0% (permissive) and 100% → 26.5% (strict tier: protocol fields and TCP flags frozen); no clean-data F1 decrease observed |
 | Self-hardening (10 seeds, 5 cycles, fixed-rule defender) | Attack success 11.6% → 7.7%, normal workflow success 97.5% → 93.5% |
 | Self-hardening, J-driven defender | Attack success 11.6% → 10.6%, normal workflow success 97.5% → 95.5%; neither defender improves J on held-out scenarios (see HANDOFF.md 2.2) |
+| Generalization (hardened on 5 attack classes) | A new near-threshold attack class drops 63.7% → 26.7%; an ABAC-clean insider flood still passes ~30%; hardening's cost falls on boundary workflows (unusual legitimate tasks 90.0% → 77.2%) |
 
 See `HANDOFF.md` for how each number was produced and what it does not show.
 

@@ -468,20 +468,52 @@ no boundary-case workflows. `self_hardening/generalization_experiment.py`:
   Blue Agent modes, 10 seeds. Figure:
   `self_hardening/figures/fig12_generalization.png`.
 
-**Results on real Edge-IIoTset: NOT MEASURED yet** (run
-`python generalization_experiment.py`, then
-`python make_generalization_figure.py`). A synthetic-schema dry run
-only showed the experiment works and that the groups behave
-differently; do not cite it.
+**Results on real Edge-IIoTset (10 seeds, mean ± std):**
 
-Reading guide for when the numbers exist:
-- seen vs held-out shows whether hardening transfers to attack classes
-  it never trained on, or only memorises the ones it saw;
-- insider_flood isolates the ML factor's contribution, low_and_slow the
-  ABAC thresholds' (they are designed to be caught by one signal each);
-- the boundary workflows show where hardening costs legitimate work,
-  per kind. Report any kind whose allowed rate drops, even if the
-  standard 100-workflow NWFSR stays high.
+| | Cycle-0 policy | Hardened, J-driven | Hardened, fixed rules |
+|---|---|---|---|
+| ASR, seen classes (new draws) | 14.5% ± 1.2 | 12.2% ± 2.7 | 8.7% ± 1.7 |
+| ASR, 3 held-out classes | 0.1% ± 0.3 | 0.0% ± 0.0 | 0.0% ± 0.0 |
+| ASR, insider_flood (new) | 35.3% ± 11.3 | 34.7% ± 11.2 | 29.3% ± 12.1 |
+| ASR, low_and_slow (new) | 63.7% ± 9.0 | 46.0% ± 16.1 | 26.7% ± 4.2 |
+| NWFSR, 100 standard workflows | 98.7% ± 0.6 | 98.6% ± 0.8 | 97.8% ± 1.2 |
+| NWFSR, 54 boundary workflows | 94.4% ± 1.4 | 92.0% ± 2.2 | 88.5% ± 2.3 |
+| – night-shift maintenance | 97.2% ± 2.8 | 96.1% ± 2.5 | 93.9% ± 1.7 |
+| – aging device | 96.1% ± 2.5 | 91.7% ± 9.0 | 94.4% ± 2.5 |
+| – unusual but legitimate task | 90.0% ± 2.2 | 88.3% ± 4.6 | 77.2% ± 3.9 |
+
+Source: `self_hardening/results/generalization.json`; figure
+`self_hardening/figures/fig12_generalization.png`.
+
+What it shows, and what to write:
+1. **The held-out classes cannot test transfer.** The integrated model
+   already blocks them at Cycle 0 (0.1%), so there is nothing for
+   hardening to transfer to. Say so; do not present 0% as evidence
+   that hardening generalizes.
+2. **Hardening does transfer to a genuinely new class.** low_and_slow
+   exists nowhere in the loop, yet the hardened policies cut it from
+   63.7% to 46.0% (J) and 26.7% (rules): tightening thresholds
+   generalizes to attacks that live near those thresholds.
+3. **insider_flood exposes a design weakness.** Its traffic records
+   are DDoS floods the model flags confidently, yet about a third get
+   through, and hardening barely changes that (35.3% → 29.3% at best).
+   The model is one weighted factor (`ml_risk`, weight 0.30) in a
+   linear trust score, not a veto, so clean ABAC attributes can
+   outweigh it. This is a finding to report, not something tuned
+   away here: adding a rule such as "deny when P(malicious) exceeds a
+   threshold" after seeing this result on these data would be fitting
+   to the test. Propose it as future work, to be evaluated on fresh
+   data.
+4. **The cost of hardening lands on boundary cases.** On 100 standard
+   workflows it is nearly invisible (98.7% → 97.8%), but on unusual but
+   legitimate tasks the fixed-rule defender drops from 90.0% to 77.2%.
+   The J-driven defender costs less (88.3%) and protects less. This is
+   the security/availability trade-off made concrete, and it is
+   invisible if only standard workflows are measured: report boundary
+   workflows separately.
+5. With 100 standard workflows, the NWFSR cost is much smaller than the
+   20-workflow canonical loop suggested; the canonical loop's NWFSR
+   should be read as coarse (each workflow = 5 points).
 
 The canonical 10-seed results are unaffected by these additions: the
 new classes are outside `red_agent.SCENARIOS`, and both Blue Agent
@@ -520,7 +552,7 @@ req/s on the ABAC decision point: p50≈0.002ms, throughput≈400K req/s
 (pure in-process Python, no network hop — cite as decision-logic
 latency only, not end-to-end system latency).
 
-**41 pytest tests, all passing** (37 confirmed on the real Edge-IIoTset; 4 R4 tests added after) (`tests/test_xzt_iiot.py`) — trust
+**41 pytest tests, all passing on the real Edge-IIoTset** (`tests/test_xzt_iiot.py`) — trust
 scoring, ML-bridge integration (scores differ by scenario, are not
 constant, and a schema mismatch fails loudly), ABAC decisions incl. QUARANTINE/STEP_UP_AUTH, Red Agent scope
 (asserts no networking imports present — a structural safety check,
@@ -607,6 +639,8 @@ inflating the headline numbers:
 10. The audit ledger is a single-node SHA-256 hash chain: tamper-evident, not a distributed blockchain (no consensus, replication or external anchoring). Say "hash-chained audit log" in the paper; do not claim blockchain-level guarantees.
 11. The J-driven Blue Agent is a greedy, one-step search over a small fixed grid (steps ≤ 0.06 per cycle). It can stall where no single small step improves J on the tuning set, even if a larger or multi-step change would. J's weights (α=1, β=0.05, γ=1, δ=0.5) are design choices, not tuned; a different weighting changes which mitigations win.
 12. Only two components are goal-based agents (2.1); the rest are a reflex agent and services. Describe the system accordingly.
+13. The ML factor is a weighted term in a linear trust score, not a veto: a device with clean ABAC attributes and confidently malicious traffic is still allowed about a third of the time (insider_flood, 2.3b).
+14. The held-out attack classes in 2.3b are already blocked at Cycle 0, so they do not test transfer; only the new low_and_slow class does.
 
 ### 2.8 Reviewer criticisms — status
 
@@ -615,7 +649,7 @@ inflating the headline numbers:
 | R1 | Track 1 and Track 2 not integrated; policy loop ignores the trained model | **Fixed in v4** — ML bridge + Experiment F (34.4% → 9.4% ASR, controlled) |
 | R2 | Single-node hash chain overclaimed as blockchain | Limitation 10 stated; wording in paper must follow it. Open option: periodic anchoring of the chain head to an external timestamping service |
 | R3 | Feature-space evasion may perturb fields an attacker cannot control | **Addressed** — three threat-model tiers on 200 held-out attacks. Undefended model: a strict-tier attacker (14 of 43 fields frozen) with 3 restarts evades all 200. Adversarial training cuts strict-tier evasion to 26.5% and permissive to 55.0% (best known); single-run figures 17.3% / 28.8% |
-| R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | **Implemented** (2.3b): hardening on 5 classes, evaluation on seen, 3 held-out and 2 new attack classes, 100 standard and 54 boundary-case legitimate workflows. Real-data numbers NOT MEASURED until run |
+| R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | **Addressed** (2.3b): hardened on 5 classes, evaluated on seen, held-out and 2 new classes plus 154 legitimate workflows. Hardening transfers to the new low_and_slow class (63.7% → 26.7%); an ABAC-clean insider flood still passes ~30% (the ML factor is a weight, not a veto); hardening's cost concentrates on boundary workflows (unusual tasks 90.0% → 77.2% with fixed rules) |
 | R5 | "Agent" undefined; components look like scripted modules | **Addressed** — standard definition (Russell & Norvig), every component labelled with its kind in code and in 2.1: two goal-based agents, one reflex agent, five services. The defender is now genuinely goal-based: the J objective, previously unused by the loop, drives it. Real data: J-driven 11.6% → 10.6% ASR, NWFSR 97.5% → 95.5% (fixed rules: → 7.7%, → 93.5%); neither improves J on held-out evaluation scenarios |
 
 ### 2.9 Hardware testbed (diploma prototype, planned)
