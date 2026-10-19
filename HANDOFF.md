@@ -329,35 +329,65 @@ so the ML bridge draws different traffic records), with latency
 measured once per search so it cannot break ties, and ties going to the
 smallest change. Deterministic (unit-tested).
 
-**J-driven Blue Agent (canonical): NOT MEASURED on real data yet.**
-Run `python run_agentic_multiseed.py` (writes
-`hardening_multiseed_summary.json`, which fig5 and Experiment E read).
+**J-driven Blue Agent (canonical; `python run_agentic_multiseed.py`,
+writes `hardening_multiseed_summary.json`, which fig5 and Experiment E
+read):**
+
+| Cycle | ASR (mean ± std) | NWFSR (mean ± std) | J on the evaluation scenarios* |
+|---|---|---|---|
+| 0 | 11.6% ± 1.0% | 97.5% ± 2.5% | 0.846 |
+| 1 | 11.8% ± 1.7% | 95.5% ± 3.5% | 0.814 |
+| 2 | 12.1% ± 1.1% | 95.5% ± 3.5% | 0.811 |
+| 3 | 11.7% ± 1.5% | 95.5% ± 3.5% | 0.815 |
+| 4 | 10.6% ± 2.3% | 95.5% ± 3.5% | 0.826 |
+
+\* J ≈ (1 − ASR) − 1.5·(1 − NWFSR) with the brief's weights; the
+latency term is below 0.001 and omitted. Computed from the means.
 
 **Fixed-rule Blue Agent (baseline; this is the run previously reported
 as the headline).** Reproduce with `python run_agentic_multiseed.py
 --blue-mode rule` (writes `hardening_multiseed_summary_rule.json`); its
 behaviour is unchanged, so it should reproduce this table exactly:
 
-| Cycle | ASR (mean ± std) | NWFSR (mean ± std) |
-|---|---|---|
-| 0 | 11.6% ± 1.0% | 97.5% ± 2.5% |
-| 1 | 11.7% ± 1.7% | 96.5% ± 2.3% |
-| 2 | 11.1% ± 1.1% | 95.0% ± 3.2% |
-| 3 | 9.6% ± 1.6% | 94.5% ± 2.7% |
-| 4 | 7.7% ± 1.4% | 93.5% ± 3.9% |
+| Cycle | ASR (mean ± std) | NWFSR (mean ± std) | J on the evaluation scenarios* |
+|---|---|---|---|
+| 0 | 11.6% ± 1.0% | 97.5% ± 2.5% | 0.846 |
+| 1 | 11.7% ± 1.7% | 96.5% ± 2.3% | 0.831 |
+| 2 | 11.1% ± 1.1% | 95.0% ± 3.2% | 0.814 |
+| 3 | 9.6% ± 1.6% | 94.5% ± 2.7% | 0.822 |
+| 4 | 7.7% ± 1.4% | 93.5% ± 3.9% | 0.826 |
+
+Reproduced exactly on rerun after the v4 changes (rule mode behaviour
+is unchanged).
 
 Fixed-rule loop: **33.5% relative ASR reduction across cycles (3.9
 points absolute), at a cost of 4.0 points of NWFSR.**
 
-**What to expect from the J-driven agent (synthetic-schema dry run
-only, not a result):** it applied a change only when one step of the
-grid improved J on the tuning set, and mostly kept the policy as it
-was: less ASR reduction than the fixed rules, but no NWFSR loss. That
-is the intended behaviour of a J maximiser, and also a real limitation:
-the search is greedy, one step per cycle with steps of at most 0.06, so
-it cannot cross a region where a single small step does not help (see
-limitation 11). Report whatever the real-data comparison shows; do not
-widen the grid after seeing the result.
+**Comparison (real data, 10 seeds):**
+
+| Defender | ASR, cycle 0 → 4 | NWFSR, cycle 0 → 4 | J, cycle 0 → 4 |
+|---|---|---|---|
+| J-driven (canonical) | 11.6% → 10.6% | 97.5% → 95.5% | 0.846 → 0.826 |
+| Fixed rules (baseline) | 11.6% → 7.7% | 97.5% → 93.5% | 0.846 → 0.826 |
+
+What this shows, and what to write:
+- The J-driven defender trades less: a smaller ASR reduction (−1.0
+  point vs −3.9) for half the NWFSR loss (−2.0 vs −4.0 points).
+- **Measured by J itself on the evaluation scenarios, neither loop
+  ends better than its starting policy** (0.846 → 0.826 for both). The
+  J-driven agent improves J on its tuning set, but the gain does not
+  carry over to the independent evaluation scenarios. State this
+  plainly; do not describe self-hardening as improving the
+  security/availability balance.
+- A likely cause, and a fix to try next: only 20 normal workflows are
+  evaluated, so one wrongly blocked request moves NWFSR by 5 points.
+  That makes NWFSR, and therefore J, coarse and noisy on both the
+  tuning and the evaluation set. Increasing and diversifying normal
+  workflows (with boundary cases) is part of R4.
+- **The headline result of Track 2 is therefore the integration (B vs
+  F: 34.4% → 9.4% ASR at 100% NWFSR), not the hardening loop.** The
+  loop adds a small further ASR reduction at a measurable availability
+  cost; present it that way.
 
 How to read this honestly:
 - Both loops start from a much lower ASR (11.6%) than pre-v4 because
@@ -396,7 +426,7 @@ cleanly across the same 10 seeds first.
 | C. ZT + Explainability | Yes | No | Yes | No | No | 34.4% | 100% |
 | D. ZT + Audit | Yes | No | No | Yes | No | 34.4% | 100% |
 | **F. ZT + Track-1 model** | Yes | **Yes** | No | No | No | **9.4%** | **100%** |
-| E. Full XZT-IIoT, J-driven Blue Agent | Yes | Yes | Yes | Yes | Yes (J) | NOT MEASURED | NOT MEASURED |
+| E. Full XZT-IIoT, J-driven Blue Agent | Yes | Yes | Yes | Yes | Yes (J) | 10.6% ± 2.3% | 95.5% |
 | E-rule. Full, fixed-rule Blue Agent | Yes | Yes | Yes | Yes | Yes (rules) | 7.7% ± 1.4% | 93.5% |
 
 Source: `self_hardening/results/ablation_table.json` / `.csv`.
@@ -539,7 +569,7 @@ inflating the headline numbers:
 | R2 | Single-node hash chain overclaimed as blockchain | Limitation 10 stated; wording in paper must follow it. Open option: periodic anchoring of the chain head to an external timestamping service |
 | R3 | Feature-space evasion may perturb fields an attacker cannot control | **Addressed** — three threat-model tiers on 200 held-out attacks. Undefended model: a strict-tier attacker (14 of 43 fields frozen) with 3 restarts evades all 200. Adversarial training cuts strict-tier evasion to 26.5% and permissive to 55.0% (best known); single-run figures 17.3% / 28.8% |
 | R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | Open. Planned: hold out some attack classes from Red Agent generation and test hardened policies against them; add borderline legitimate workflows |
-| R5 | "Agent" undefined; components look like scripted modules | **Addressed** — standard definition (Russell & Norvig), every component labelled with its kind in code and in 2.1: two goal-based agents, one reflex agent, five services. The defender is now genuinely goal-based: the J objective, previously unused by the loop, drives it. J-driven real-data numbers NOT MEASURED until rerun |
+| R5 | "Agent" undefined; components look like scripted modules | **Addressed** — standard definition (Russell & Norvig), every component labelled with its kind in code and in 2.1: two goal-based agents, one reflex agent, five services. The defender is now genuinely goal-based: the J objective, previously unused by the loop, drives it. Real data: J-driven 11.6% → 10.6% ASR, NWFSR 97.5% → 95.5% (fixed rules: → 7.7%, → 93.5%); neither improves J on held-out evaluation scenarios |
 
 ### 2.9 Hardware testbed (diploma prototype, planned)
 

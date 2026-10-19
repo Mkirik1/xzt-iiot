@@ -26,7 +26,7 @@ Two independent, measured contributions:
 | Adversarial evasion (black-box, 200 held-out attacks) | Undefended model: 90.3% single-run evasion; with 3 restarts, all 200 evaded, even when 14 protocol fields are frozen |
 | + Adversarial training defense | Best-known evasion 100% → 55.0% (permissive) and 100% → 26.5% (strict tier: protocol fields and TCP flags frozen); no clean-data F1 decrease observed |
 | Self-hardening (10 seeds, 5 cycles, fixed-rule defender) | Attack success 11.6% → 7.7%, normal workflow success 97.5% → 93.5% |
-| Self-hardening, J-driven defender | Not yet measured on real data |
+| Self-hardening, J-driven defender | Attack success 11.6% → 10.6%, normal workflow success 97.5% → 95.5%; neither defender improves J on held-out scenarios (see HANDOFF.md 2.2) |
 
 See `HANDOFF.md` for how each number was produced and what it does not show.
 
