@@ -26,6 +26,18 @@ SCENARIOS = ["stolen_credentials", "compromised_device",
              "abnormal_access_time", "privilege_escalation_attempt",
              "replay_simulation", "firmware_integrity_failure"]
 
+# Out-of-distribution classes for the generalization experiment
+# (generalization_experiment.py, reviewer R4). Deliberately NOT in
+# SCENARIOS: the hardening loop never trains against them, and the
+# canonical experiments are unchanged by their existence.
+#   insider_flood  every ABAC attribute looks legitimate (valid identity,
+#                  healthy device, right zone, working hours); only the
+#                  traffic is malicious. Only the ML factor can see it.
+#   low_and_slow   every ABAC attribute sits just inside the Cycle-0
+#                  thresholds and the traffic is ordinary. The ML factor
+#                  is blind to it; it probes the policy's boundaries.
+OOD_SCENARIOS = ["insider_flood", "low_and_slow"]
+
 RESOURCE_ACTION_PAIRS = [
     ("PLC_CONTROLLER", "WRITE_SETPOINT", "engineering"),
     ("HMI_WORKSTATION", "READ_STATUS", "operations"),
@@ -89,19 +101,35 @@ def _apply_scenario(req: AccessRequest, scenario: str, rng: random.Random) -> Ac
         # worse than compromised_device: integrity check outright fails
         req.device.device_integrity = rng.uniform(0.05, 0.3)
         req.device.patch_level = rng.uniform(0.0, 0.2)
+    elif scenario == "insider_flood":
+        # a legitimate, healthy, correctly placed device used to flood the
+        # target: only slightly less typical behaviour, anomaly well under
+        # every ceiling
+        req.context.behavioral_trust = rng.uniform(0.6, 0.75)
+        req.context.anomaly_score = rng.uniform(0.2, 0.35)
+    elif scenario == "low_and_slow":
+        # just inside the Cycle-0 policy limits (anomaly ceilings 0.65-0.80,
+        # min integrity 0.50-0.60), in working hours, ordinary traffic
+        req.context.anomaly_score = rng.uniform(0.5, 0.62)
+        req.context.behavioral_trust = rng.uniform(0.45, 0.6)
+        req.device.device_integrity = rng.uniform(0.62, 0.72)
+        req.context.access_hour = rng.randint(8, 17)
+    else:
+        raise ValueError(f"unknown scenario {scenario!r}")
     req.label = scenario
     req.metadata["attack_scenario"] = scenario
     return req
 
 
-def generate_attack_scenarios(n_per_type: int = 8, seed: int = 42) -> List[AccessRequest]:
+def generate_attack_scenarios(n_per_type: int = 8, seed: int = 42,
+                              scenarios: List[str] = None) -> List[AccessRequest]:
     """Test set: n_per_type instances of each of the 5 scenario classes.
     `seed` makes this reproducible AND lets the multi-seed runner draw
     independent scenario sets to test statistical robustness (RQ1)."""
     rng = random.Random(seed)
     out = []
     i = 0
-    for scenario in SCENARIOS:
+    for scenario in (SCENARIOS if scenarios is None else scenarios):
         for _ in range(n_per_type):
             req = _base_legit_request(f"atk_{i:03d}", rng)
             req = _apply_scenario(req, scenario, rng)
@@ -111,7 +139,8 @@ def generate_attack_scenarios(n_per_type: int = 8, seed: int = 42) -> List[Acces
 
 
 def generate_attack_scenarios_weighted(base_n_per_type: int, weights: dict,
-                                        seed: int = 42) -> List[AccessRequest]:
+                                        seed: int = 42,
+                                        scenarios: List[str] = None) -> List[AccessRequest]:
     """Same as generate_attack_scenarios, but scales the count per
     scenario type by a priority weight (e.g. from ThreatIntelAgent's
     severity signal) instead of using a flat count for every type.
@@ -119,7 +148,7 @@ def generate_attack_scenarios_weighted(base_n_per_type: int, weights: dict,
     rng = random.Random(seed)
     out = []
     i = 0
-    for scenario in SCENARIOS:
+    for scenario in (SCENARIOS if scenarios is None else scenarios):
         n = max(1, round(base_n_per_type * weights.get(scenario, 1.0)))
         for _ in range(n):
             req = _base_legit_request(f"atk_{i:03d}", rng)

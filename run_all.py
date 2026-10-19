@@ -40,6 +40,9 @@ STEPS = [
     ("Track 2 — ablation study (Experiments A-F)",
      ["python", "ablation_experiment.py"], "self_hardening"),
     ("Track 2 — hardening cycle figure", ["python", "make_figure.py"], "self_hardening"),
+    ("Track 2 — generalization to unseen attacks and boundary workflows (reviewer R4)",
+     ["python", "generalization_experiment.py"], "self_hardening"),
+    ("Track 2 — generalization figure", ["python", "make_generalization_figure.py"], "self_hardening"),
     ("Track 2 — tests", ["python", "-m", "pytest", "tests/", "-v"], "self_hardening"),
 ]
 

@@ -28,7 +28,9 @@ for every candidate. Many candidates tie on ASR/NWFSR, so timer noise
 decided which mitigation was applied, and two identical runs could
 diverge. Thresholds do not change how much work a decision takes, so L
 is now measured once per search and is the same for every candidate:
-it is reported, but it cannot affect the choice. Ties go to the
+it is recorded on each Candidate (latency_ms) but excluded from the J
+used for ranking and logging, since a constant cannot change the
+argmax and would only add timer noise to logged values. Ties go to the
 earliest candidate in the grid, which is ordered from the smallest
 change upward.
 """
@@ -138,7 +140,11 @@ def search_best_candidate(policy_engine: PolicyEngine, attack_reqs: list, normal
         trial = _clone_engine(policy_engine)
         _apply_candidate(trial, dt, di, da, su, dm)
         result = validate(trial, attack_reqs, normal_reqs)
-        J = objective_J(result.asr, result.nwfsr, latency_ms, weights)
+        # latency is identical for every candidate, so it is recorded but
+        # left out of the J used for ranking and logging; that keeps the
+        # logged values reproducible run to run (timer noise otherwise
+        # shows up in the 4th decimal)
+        J = objective_J(result.asr, result.nwfsr, 0.0, weights)
         cand = Candidate(dt, di, da, su, result.asr, result.nwfsr, latency_ms, J, dm)
         evaluated.append(cand)
         if best is None or cand.J > best.J:

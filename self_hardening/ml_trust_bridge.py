@@ -78,6 +78,9 @@ SCENARIO_TO_ATTACK_TYPE = {
     "privilege_escalation_attempt": "SQL_Injection",  # abuse of elevated access -> injection payload
     "replay_simulation": "MITM",                     # replayed/stale session -> interception-adjacent
     "firmware_integrity_failure": "Ransomware",      # severe device compromise -> high-severity malware
+    # out-of-distribution classes, used only by generalization_experiment.py
+    "insider_flood": "DDoS_UDP",                     # legitimate-looking device flooding the target
+    "low_and_slow": "Normal",                        # ABAC-boundary probe with ordinary traffic
 }
 
 NON_FEATURE_COLUMNS = {"label_binary", "device_id", "attack_type"}

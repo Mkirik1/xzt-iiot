@@ -20,10 +20,15 @@ class RedAgent(BaseAgent):
     name = "Red Agent"
     agent_kind = "service"   # samples scenarios from fixed ranges; never observes the policy it tests
 
-    def run(self, base_n_per_type: int, threat_weights: dict, seed: int) -> AgentResult:
+    def run(self, base_n_per_type: int, threat_weights: dict, seed: int,
+            scenario_types: list = None) -> AgentResult:
+        """scenario_types restricts which classes are generated (None = all
+        of red_agent.SCENARIOS); used to hold classes out of hardening."""
         self.status = "running"
-        scenarios = _engine.generate_attack_scenarios_weighted(base_n_per_type, threat_weights, seed)
-        counts = {s: sum(1 for r in scenarios if r.label == s) for s in _engine.SCENARIOS}
+        scenarios = _engine.generate_attack_scenarios_weighted(base_n_per_type, threat_weights, seed,
+                                                               scenarios=scenario_types)
+        types = _engine.SCENARIOS if scenario_types is None else scenario_types
+        counts = {s: sum(1 for r in scenarios if r.label == s) for s in types}
         return self._result(
             output=scenarios, confidence=1.0,
             reasoning_summary=(f"Generated {len(scenarios)} adversarial test scenarios "

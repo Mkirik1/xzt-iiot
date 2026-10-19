@@ -441,6 +441,53 @@ Source: `self_hardening/results/ablation_table.json` / `.csv`.
   observability layers, they do not change decisions. Their cost is
   latency (C: 0.005 ms/decision, D: 0.013 ms/decision in the latest run).
 
+### 2.3b Generalization to unseen attacks and boundary workflows (response to reviewer R4)
+
+Reviewer R4: only one scenario family, no out-of-distribution attacks,
+no boundary-case workflows. `self_hardening/generalization_experiment.py`:
+
+- **Hardening sees only 5 classes** (stolen_credentials,
+  compromised_device, network_zone_mismatch, behavioral_anomaly,
+  abnormal_access_time); attack sets and the Blue Agent's tuning set
+  are both restricted to them.
+- **Evaluation** (new draws the loop never saw, 30 per class, with
+  request IDs that make the ML bridge draw different traffic records):
+  the 5 seen classes; 3 held-out classes (privilege_escalation_attempt,
+  replay_simulation, firmware_integrity_failure); 2 classes defined
+  only for this test: **insider_flood** (every ABAC attribute
+  legitimate, traffic is a DDoS_UDP record; only the model can see it)
+  and **low_and_slow** (every attribute just inside the Cycle-0
+  thresholds, ordinary traffic; the model is blind to it).
+- **Legitimate work:** 100 standard workflows (vs 20 inside the loop)
+  plus 54 boundary cases, balanced over 3 kinds × 3 resources:
+  night-shift maintenance, aging but uncompromised devices
+  (integrity 0.62–0.75), and unusual but authorised tasks
+  (anomaly 0.30–0.50). Roles and zones are always valid, so every
+  block is a real false positive.
+- Compared: the Cycle-0 policy vs the policy after 5 cycles, for both
+  Blue Agent modes, 10 seeds. Figure:
+  `self_hardening/figures/fig12_generalization.png`.
+
+**Results on real Edge-IIoTset: NOT MEASURED yet** (run
+`python generalization_experiment.py`, then
+`python make_generalization_figure.py`). A synthetic-schema dry run
+only showed the experiment works and that the groups behave
+differently; do not cite it.
+
+Reading guide for when the numbers exist:
+- seen vs held-out shows whether hardening transfers to attack classes
+  it never trained on, or only memorises the ones it saw;
+- insider_flood isolates the ML factor's contribution, low_and_slow the
+  ABAC thresholds' (they are designed to be caught by one signal each);
+- the boundary workflows show where hardening costs legitimate work,
+  per kind. Report any kind whose allowed rate drops, even if the
+  standard 100-workflow NWFSR stays high.
+
+The canonical 10-seed results are unaffected by these additions: the
+new classes are outside `red_agent.SCENARIOS`, and both Blue Agent
+modes were checked to reproduce identical per-seed ASR/NWFSR after the
+change.
+
 ### 2.4 New capabilities added this session (real, tested, extending beyond the paper's minimum claim)
 
 **Objective function search (`objective_function.py`)** — implements
@@ -473,7 +520,7 @@ req/s on the ABAC decision point: p50≈0.002ms, throughput≈400K req/s
 (pure in-process Python, no network hop — cite as decision-logic
 latency only, not end-to-end system latency).
 
-**37 pytest tests, all passing** (33 confirmed on the real Edge-IIoTset; 4 R5/J tests added after) (`tests/test_xzt_iiot.py`) — trust
+**41 pytest tests, all passing** (37 confirmed on the real Edge-IIoTset; 4 R4 tests added after) (`tests/test_xzt_iiot.py`) — trust
 scoring, ML-bridge integration (scores differ by scenario, are not
 constant, and a schema mismatch fails loudly), ABAC decisions incl. QUARANTINE/STEP_UP_AUTH, Red Agent scope
 (asserts no networking imports present — a structural safety check,
@@ -568,7 +615,7 @@ inflating the headline numbers:
 | R1 | Track 1 and Track 2 not integrated; policy loop ignores the trained model | **Fixed in v4** — ML bridge + Experiment F (34.4% → 9.4% ASR, controlled) |
 | R2 | Single-node hash chain overclaimed as blockchain | Limitation 10 stated; wording in paper must follow it. Open option: periodic anchoring of the chain head to an external timestamping service |
 | R3 | Feature-space evasion may perturb fields an attacker cannot control | **Addressed** — three threat-model tiers on 200 held-out attacks. Undefended model: a strict-tier attacker (14 of 43 fields frozen) with 3 restarts evades all 200. Adversarial training cuts strict-tier evasion to 26.5% and permissive to 55.0% (best known); single-run figures 17.3% / 28.8% |
-| R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | Open. Planned: hold out some attack classes from Red Agent generation and test hardened policies against them; add borderline legitimate workflows |
+| R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | **Implemented** (2.3b): hardening on 5 classes, evaluation on seen, 3 held-out and 2 new attack classes, 100 standard and 54 boundary-case legitimate workflows. Real-data numbers NOT MEASURED until run |
 | R5 | "Agent" undefined; components look like scripted modules | **Addressed** — standard definition (Russell & Norvig), every component labelled with its kind in code and in 2.1: two goal-based agents, one reflex agent, five services. The defender is now genuinely goal-based: the J objective, previously unused by the loop, drives it. Real data: J-driven 11.6% → 10.6% ASR, NWFSR 97.5% → 95.5% (fixed rules: → 7.7%, → 93.5%); neither improves J on held-out evaluation scenarios |
 
 ### 2.9 Hardware testbed (diploma prototype, planned)

@@ -40,7 +40,7 @@ src/                    Track 1: trust scoring, SHAP, adversarial evasion/defens
 self_hardening/          Track 2: self-hardening loop, API + dashboard, tests
   agents/                 Individual agent implementations
   api/                     FastAPI backend + web dashboard
-  tests/                   pytest suite (37 tests)
+  tests/                   pytest suite (41 tests)
 data/                    Dataset location (not included — see below)
 results/, figures/       Generated outputs (not tracked in git — reproducible)
 HANDOFF.md               Full mapping of every reported number to its source file

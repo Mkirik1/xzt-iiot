@@ -112,8 +112,8 @@ class TestMLTrustIntegration:
         normal_scores = [bridge.score_scenario("normal", "PLC_CONTROLLER", f"norm_{i}")
                           for i in range(10)]
         for scenario in SCENARIO_TO_ATTACK_TYPE:
-            if scenario in ("normal", "abnormal_access_time"):
-                continue  # both map to Normal traffic by design -- see ml_trust_bridge.py
+            if SCENARIO_TO_ATTACK_TYPE[scenario] == "Normal":
+                continue  # ML-blind by design (normal, abnormal_access_time, low_and_slow)
             attack_scores = [bridge.score_scenario(scenario, "PLC_CONTROLLER", f"{scenario}_{i}")
                               for i in range(10)]
             assert sum(attack_scores) / len(attack_scores) > sum(normal_scores) / len(normal_scores), (
@@ -477,3 +477,39 @@ class TestAgentDefinitionAndObjectiveBlue:
         assert rec["blue_mode"] == "objective"
         assert rec["mitigation_changes"][0].startswith("Applied highest-J candidate")
         assert res.output["audit_valid"]
+
+
+# ---- R4: generalization to unseen attacks and boundary workflows ----
+
+class TestGeneralization:
+    def test_ood_classes_stay_out_of_the_default_scenario_set(self):
+        from red_agent import OOD_SCENARIOS
+        assert not set(OOD_SCENARIOS) & set(SCENARIOS)
+        default_labels = {r.label for r in generate_attack_scenarios(n_per_type=2, seed=1)}
+        assert default_labels == set(SCENARIOS)
+
+    def test_scenario_subset_is_respected(self):
+        from red_agent import OOD_SCENARIOS
+        reqs = generate_attack_scenarios(n_per_type=4, seed=2, scenarios=OOD_SCENARIOS)
+        assert {r.label for r in reqs} == set(OOD_SCENARIOS) and len(reqs) == 8
+
+    def test_boundary_workflows_are_legitimate_and_balanced(self):
+        from collections import Counter
+        from normal_scenarios import (ALLOWED_ROLES_BY_RESOURCE, BOUNDARY_KINDS,
+                                      generate_boundary_normal_scenarios)
+        reqs = generate_boundary_normal_scenarios(n=54, seed=3)
+        assert all(r.label == "normal" for r in reqs)
+        assert all(r.subject.role in ALLOWED_ROLES_BY_RESOURCE[r.resource] for r in reqs)
+        assert all(r.network.source_zone == r.network.expected_zone for r in reqs)
+        combos = Counter((r.metadata["boundary_kind"], r.resource) for r in reqs)
+        assert len(combos) == len(BOUNDARY_KINDS) * 3 and len(set(combos.values())) == 1
+
+    def test_hardening_can_be_restricted_to_seen_classes(self):
+        from agents.coordinator_agent import CoordinatorAgent
+        from generalization_experiment import SEEN
+        res = CoordinatorAgent(blue_mode="objective").run_experiment(
+            seed=5, n_cycles=2, n_per_attack_type_base=2, n_normal=5, verbose=False,
+            attack_scenarios=SEEN)
+        bypassed = {s for r in res.output["cycle_results"] for s in r["bypassed_scenarios"]}
+        assert bypassed <= set(SEEN)
+        assert res.output["final_policy_engine"] is not None

@@ -79,7 +79,12 @@ class CoordinatorAgent(BaseAgent):
                         n_per_attack_type_base: int = N_PER_ATTACK_TYPE_BASE,
                         n_normal: int = N_NORMAL, write_explanations: bool = False,
                         use_evolutionary_red: bool = False, try_live_threat_intel: bool = False,
-                        use_ml_integration: bool = True, verbose: bool = True) -> AgentResult:
+                        use_ml_integration: bool = True, verbose: bool = True,
+                        attack_scenarios: list = None) -> AgentResult:
+        """attack_scenarios restricts the classes the loop is hardened
+        against (attack sets and the Blue Agent's tuning set alike);
+        None = all of red_agent.SCENARIOS. Used to hold classes out for
+        the generalization experiment."""
         self.status = "running"
         # Track1/Track2 integration fix: every trust score computed in this
         # run now also consults the ACTUAL trained Track-1 XGBoost model via
@@ -115,7 +120,8 @@ class CoordinatorAgent(BaseAgent):
                 if verbose:
                     print(f"  [EvolutionaryRedAgent] {evo_result.reasoning_summary}")
             else:
-                red_result = self.red.run(n_per_attack_type_base, threat_weights, seed=seed * 100 + cycle)
+                red_result = self.red.run(n_per_attack_type_base, threat_weights, seed=seed * 100 + cycle,
+                                          scenario_types=attack_scenarios)
                 attack_reqs = red_result.output
 
             attack_policy_result = policy_agent.run(attack_reqs)
@@ -149,7 +155,8 @@ class CoordinatorAgent(BaseAgent):
                 tuning_attack = None
                 if self.blue_mode == "objective":
                     tuning_attack = self.red.run(n_per_attack_type_base, threat_weights,
-                                                 seed=seed * 100 + cycle + 50_000).output
+                                                 seed=seed * 100 + cycle + 50_000,
+                                                 scenario_types=attack_scenarios).output
                     for r in tuning_attack:
                         r.request_id = "tune_" + r.request_id
                 blue_result = self.blue.run(policy_engine, trust_engine, result, cycle,
@@ -178,6 +185,7 @@ class CoordinatorAgent(BaseAgent):
 
         return self._result(
             output={"cycle_results": cycle_results, "audit_valid": audit_result.output["valid"],
+                    "final_policy_engine": policy_engine,
                     "audit_blocks": audit_result.output["blocks"], "audit_chain": self.audit.chain,
                     "sample_explanations": sample_explanations,
                     "threat_intel_source": threat_intel_source},
