@@ -20,8 +20,8 @@ import numpy as np
 from hardening_loop import run, N_CYCLES
 
 RESULTS = Path(__file__).parent / "results"
-N_SEEDS = 5
-SEEDS = [42, 101, 202, 303, 404]
+N_SEEDS = 10
+SEEDS = [42, 101, 202, 303, 404, 505, 606, 707, 808, 909]
 
 
 def main():

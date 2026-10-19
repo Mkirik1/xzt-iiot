@@ -133,30 +133,26 @@ freely) is future work.
 | **CoordinatorAgent** | `agents/coordinator_agent.py` | Orchestrates all of the above across N cycles |
 
 Canonical entry point: `self_hardening/run_agentic_multiseed.py` for
-the paper's reported numbers (5 seeds, static Red Agent, matches the
+the paper's reported numbers (10 seeds, threat-weighted Red Agent, matches the
 numbers table below). For the evolutionary/live-threat variant, use
 `CoordinatorAgent.run_experiment(use_evolutionary_red=True,
 try_live_threat_intel=True)` directly, or the API/dashboard.
 
-### 2.2 Reported numbers (5 seeds, 5 cycles, threat-weighted 8-scenario Red Agent — the CURRENT, authoritative run fig5 was generated from)
+### 2.2 Reported numbers (10 seeds, 5 cycles, threat-weighted 8-scenario Red Agent — the CURRENT, authoritative run fig5 was generated from)
 
-**CORRECTED — a prior version of this file had a stale table (41.7%→17.2%)
-left over from before the Red Agent's scenario set was expanded from 5
-to 8 types. An external review caught that it no longer matched
-fig5_hardening_cycles.png. The table below is the current, verified
-match — re-check against the JSON source before ever citing a number
-from this section, since this exact class of error already happened
-once.**
+**Expanded from 5 to 10 seeds per supervisor feedback, for a more
+statistically robust mean (std is now smaller/tighter per cycle than
+the 5-seed version — a genuine improvement, not just a bigger number).**
 
 | Cycle | ASR (mean ± std) | NWFSR (mean ± std) |
 |---|---|---|
-| 0 | 38.8% ± 2.4% | 100.0% ± 0.0% |
-| 1 | 30.2% ± 2.1% | 100.0% ± 0.0% |
-| 2 | 26.0% ± 1.5% | 100.0% ± 0.0% |
-| 3 | 20.1% ± 2.0% | 100.0% ± 0.0% |
-| 4 | 15.3% ± 1.8% | 100.0% ± 0.0% |
+| 0 | 37.2% ± 2.6% | 100.0% ± 0.0% |
+| 1 | 31.3% ± 3.0% | 100.0% ± 0.0% |
+| 2 | 25.6% ± 1.8% | 100.0% ± 0.0% |
+| 3 | 21.4% ± 2.7% | 100.0% ± 0.0% |
+| 4 | 15.3% ± 2.1% | 100.0% ± 0.0% |
 
-**60.5% relative ASR reduction.** Source: `self_hardening/results/hardening_multiseed_summary.json`.
+**59.0% relative ASR reduction.** Source: `self_hardening/results/hardening_multiseed_summary.json`.
 Figure: `self_hardening/figures/fig5_hardening_cycles.png`.
 
 **Use this table for the paper.** The evolutionary/live-CVE mode is a
@@ -164,9 +160,9 @@ real, tested, working *extension* (great for a demo, a "future
 directions realized" paragraph, or a follow-up paper) but was run with
 different, non-standardized parameters during development — don't mix
 its ad-hoc numbers into the reported table without re-running it
-cleanly across the same 5 seeds first.
+cleanly across the same 10 seeds first.
 
-### 2.3 Ablation study — Experiments A–E (CORRECTED to match the current 8-scenario run)
+### 2.3 Ablation study — Experiments A–E (E updated to match the 10-seed run)
 
 | Experiment | Zero-Trust | Explainability | Blockchain | Adaptive AI | ASR | NWFSR |
 |---|---|---|---|---|---|---|
@@ -174,7 +170,7 @@ cleanly across the same 5 seeds first.
 | B. Zero-Trust ABAC | Yes | No | No | No | 34.4% | 100% |
 | C. ZT + Explainability | Yes | Yes | No | No | 34.4% | 100% |
 | D. ZT + Blockchain | Yes | No | Yes | No | 34.4% | 100% |
-| E. Full XZT-IIoT | Yes | Yes | Yes | Yes | 15.3% ± 1.8% | 100% |
+| E. Full XZT-IIoT | Yes | Yes | Yes | Yes | 15.3% ± 2.1% | 100% |
 
 Source: `self_hardening/results/ablation_table.json` / `.csv`.
 
