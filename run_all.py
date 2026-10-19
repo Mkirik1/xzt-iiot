@@ -28,6 +28,9 @@ STEPS = [
     ("Track 1.5 — adversarial training defense", ["python", "src/adversarial_training_defense.py"]),
     ("Track 1.5 — evasion figure", ["python", "src/make_evasion_figure.py"]),
     ("Track 1.5 — defense figure", ["python", "src/make_defense_figure.py"]),
+    ("Track 1.5 — protocol-constrained evasion (reviewer R3)",
+     ["python", "src/adversarial_evasion_constrained.py"]),
+    ("Track 1.5 — constrained evasion figure", ["python", "src/make_constrained_evasion_figure.py"]),
     ("Architecture diagram", ["python", "src/make_security_architecture_diagram.py"]),
     ("Track 1/1.5 tests", ["python", "-m", "pytest", "src/test_adversarial_evasion.py", "-v"]),
     ("Track 2 — 8-agent self-hardening (10 seeds)",
@@ -77,7 +80,7 @@ def main():
     print(f"  ALL STEPS COMPLETE ({total/60:.1f} minutes)")
     print("=" * 70)
     print("\nResults:  results/*.json, self_hardening/results/*.json")
-    print("Figures:  figures/*.png (9 files), self_hardening/figures/*.png")
+    print("Figures:  figures/*.png, self_hardening/figures/*.png")
     print("\nTo launch the live dashboard now, run separately:")
     print("  cd self_hardening")
     print("  python -m uvicorn api.app:app --reload")

@@ -18,9 +18,9 @@ ever showed). This is a common, standard feature-space threat model in
 adversarial ML research; it is more permissive than most real
 attackers (who can't fully control protocol-state fields like
 tcp.seq/tcp.ack, which are determined by the TCP handshake, not
-freely chosen) -- so the resulting evasion rate is a pessimistic/
-worst-case upper bound, not a claim that this exact attack is
-practically executable by a real adversary. State this honestly.
+freely chosen). Report the result as the evasion rate measured under
+this permissive model, not as a practical attack. The protocol-
+constrained comparison lives in adversarial_evasion_constrained.py.
 
 SUCCESS CRITERION: matches the actual deployed decision threshold in
 policy_engine.py (TAU_ALLOW=0.80), not just flipping the raw 0.5
@@ -68,19 +68,27 @@ def predict_p_malicious(model, feature_cols, row_dict):
 
 
 def evasion_search(model, feature_cols, bounds, original_row, rng,
-                    max_iters=MAX_ITERS, step_features=FEATURES_PER_STEP):
+                    max_iters=MAX_ITERS, step_features=FEATURES_PER_STEP,
+                    mutable_cols=None):
     """Black-box hill-climbing: only queries predict_proba (no gradient/
     internals access), mutates a random feature subset each step, keeps
     the mutation only if it lowers P(malicious). Stops early once the
-    ACTUAL deployed ALLOW threshold would be crossed."""
+    ACTUAL deployed ALLOW threshold would be crossed.
+
+    mutable_cols restricts which features the attacker may change (see
+    adversarial_evasion_constrained.py). None = all features, which is
+    the original permissive threat model."""
+    mutable = list(feature_cols) if mutable_cols is None else list(mutable_cols)
     best = dict(original_row)
     best_p = predict_p_malicious(model, feature_cols, best)
     history = [best_p]
     target_p = 1 - TAU_ALLOW  # trust_score = 1-p >= TAU_ALLOW  <=>  p <= 1-TAU_ALLOW
+    if not mutable:
+        return best, best_p, history
 
     for _ in range(max_iters):
         candidate = dict(best)
-        feats = rng.choice(feature_cols, size=min(step_features, len(feature_cols)), replace=False)
+        feats = rng.choice(mutable, size=min(step_features, len(mutable)), replace=False)
         for f in feats:
             lo, hi, std = bounds[f]
             if std == 0:

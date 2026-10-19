@@ -47,3 +47,36 @@ def test_hill_climbing_never_gets_worse(setup):
     assert adv_p <= orig_p + 1e-9
     # history should be non-increasing (we only ever keep improvements)
     assert all(history[i] >= history[i + 1] - 1e-9 for i in range(len(history) - 1))
+
+
+def test_constrained_search_never_touches_frozen_features(setup):
+    """R3 threat model: features outside mutable_cols must come back
+    exactly as they went in, whatever the schema."""
+    model, feature_cols, df, bounds = setup
+    mutable = feature_cols[: len(feature_cols) // 2]
+    frozen = [f for f in feature_cols if f not in mutable]
+    rng = np.random.default_rng(7)
+    row = df[df.label_binary == 1].iloc[3][feature_cols].to_dict()
+    adv, _, _ = evasion_search(model, feature_cols, bounds, row, rng,
+                               max_iters=40, mutable_cols=mutable)
+    for f in frozen:
+        assert adv[f] == row[f], f"frozen feature {f} was changed"
+
+
+def test_no_mutable_features_means_no_change(setup):
+    model, feature_cols, df, bounds = setup
+    row = df[df.label_binary == 1].iloc[4][feature_cols].to_dict()
+    adv, adv_p, history = evasion_search(model, feature_cols, bounds, row,
+                                         np.random.default_rng(1), mutable_cols=[])
+    assert adv == row and len(history) == 1
+
+
+def test_tier_split_freezes_named_protocol_fields():
+    from adversarial_evasion_constrained import TIERS, split_features
+    cols = ["tcp.seq", "tcp.ack", "tcp.checksum", "tcp.flags", "tcp.len", "mqtt.hdrflags"]
+    mutable, frozen = split_features(cols, TIERS["protocol_constrained"])
+    assert set(frozen) == {"tcp.seq", "tcp.ack", "tcp.checksum"}
+    assert "tcp.flags" in mutable and "tcp.len" in mutable
+    _, frozen_strict = split_features(cols, TIERS["strict"])
+    assert "tcp.flags" in frozen_strict
+    assert split_features(cols, TIERS["permissive"]) == (cols, [])

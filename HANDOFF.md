@@ -174,6 +174,44 @@ section with — it demonstrates genuine security-research depth (attack
 + defense + honest residual risk), not just a classification benchmark.
 Consider referencing it from the Abstract/Introduction as well.
 
+### Protocol-constrained evasion (response to reviewer R3)
+
+`src/adversarial_evasion_constrained.py` re-runs the identical search
+on the identical 200 held-out attacks with the identical budget, under
+three threat models:
+
+| Tier | What the attacker may change | Frozen fields (each has a written reason in the code) |
+|---|---|---|
+| permissive | every feature | none (the original 91.5% result) |
+| protocol_constrained | everything the sender actually chooses | checksums (`tcp.checksum`, `icmp.checksum`), TCP sequence state (`tcp.seq`, `tcp.ack`, `tcp.ack_raw`), Wireshark-assigned indices (`udp.stream`, `tcp.stream`, `dns.retransmit_request_in`), `arp.hw.size` |
+| strict | as above, minus TCP control flags | + `tcp.flags`, `tcp.flags.ack`, `tcp.connection.{syn,synack,fin,rst}` |
+
+Each tier is searched with 3 seeds (42, 43, 44) and reported as
+mean ± std; with one seed, search noise can make strict look marginally
+easier than protocol_constrained, which a reviewer would rightly
+question. Even averaged, strict is not guaranteed to come out lower
+than protocol_constrained: with fewer mutable features, each random
+step concentrates on the remaining ones, which can make a fixed-budget
+search slightly more efficient (seen in a synthetic-schema dry run:
+23.1% ± 3.5 vs 25.4% ± 0.2). The tiers bound what the attacker may
+change, not how good the search is; if this happens on real data,
+report it and explain it this way. Seed 42 of the permissive tier reproduces
+`adversarial_evasion.py` exactly (printed as a sanity check). Figure:
+`figures/fig11_constrained_evasion.png`.
+
+**Results on real Edge-IIoTset: NOT MEASURED yet.** Note for writing it
+up: several of the most-exploited features in the permissive run
+(`tcp.ack_raw`, `tcp.ack`, `tcp.checksum`, `tcp.seq`) are frozen in the
+constrained tiers, so a substantial drop is plausible, but do not
+predict the number; report whatever is measured, including a small
+drop if that is what happens.
+
+Still not modelled, even in the strict tier: whether the perturbed
+traffic still achieves the attack's purpose, and consistency between
+mutable fields (e.g. `tcp.len` vs the actual payload). Both make the
+constrained rates an over-estimate of a real attacker, not an
+under-estimate.
+
 ### Limitation to add to the cumulative list
 
 The adversarial evasion threat model is a permissive, feature-space
@@ -395,7 +433,7 @@ inflating the headline numbers:
 |---|---|---|
 | R1 | Track 1 and Track 2 not integrated; policy loop ignores the trained model | **Fixed in v4** — ML bridge + Experiment F (34.4% → 9.4% ASR, controlled) |
 | R2 | Single-node hash chain overclaimed as blockchain | Limitation 10 stated; wording in paper must follow it. Open option: periodic anchoring of the chain head to an external timestamping service |
-| R3 | Feature-space evasion may perturb fields an attacker cannot control | Open. Planned: a protocol-constrained variant of `adversarial_evasion.py` that freezes fields the sender cannot set freely (e.g. `tcp.ack`, `tcp.checksum`) and reports both rates |
+| R3 | Feature-space evasion may perturb fields an attacker cannot control | **Implemented, real-data numbers NOT MEASURED yet** — `src/adversarial_evasion_constrained.py` (three threat-model tiers, see Track 1.5 below); run `python src/adversarial_evasion_constrained.py` then `python src/make_constrained_evasion_figure.py` on the real data |
 | R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | Open. Planned: hold out some attack classes from Red Agent generation and test hardened policies against them; add borderline legitimate workflows |
 | R5 | "Agent" undefined; components look like scripted modules | Open. Planned: an explicit definition (perceive → decide → act with state and a goal) and honest relabelling of components that do not meet it |
 
