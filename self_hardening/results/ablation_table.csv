@@ -3,5 +3,6 @@ Experiment A (Baseline ABAC),No,No,No,No,No,No,0.7,1.0
 Experiment B (Zero-Trust ABAC),Yes,Yes,No,No,No,No,0.3438,1.0
 Experiment C (ZT + Explainability),Yes,Yes,Yes,No,No,No,0.3438,1.0
 Experiment D (ZT + Blockchain),Yes,Yes,No,Yes,No,No,0.3438,1.0
-Experiment E (Full XZT-IIoT),Yes,Yes,Yes,Yes,Yes,No,0.0772±0.0137,0.935
+Experiment E (Full XZT-IIoT),Yes,Yes,Yes,Yes,Yes (J-driven),Yes,0.1061±0.0226,0.955
+"Experiment E-rule (Full, fixed-rule Blue Agent)",Yes,Yes,Yes,Yes,Yes (fixed rules),Yes,0.0772±0.0137,0.935
 "Experiment F (ZT ABAC + Track-1 ML model, static)",Yes,Yes,No,No,No,Yes,0.0938,1.0
