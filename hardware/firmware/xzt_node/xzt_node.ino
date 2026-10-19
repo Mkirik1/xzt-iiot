@@ -137,7 +137,12 @@ void onMessage(char* topic, byte* payload, unsigned int len) {
 void connectMqtt() {
   while (!mqtt.connected()) {
     Serial.print("MQTT...");
-    bool ok = strlen(MQTT_USER) ? mqtt.connect(DEVICE_ID, MQTT_USER, MQTT_PASS) : mqtt.connect(DEVICE_ID);
+    // Client ID carries the prefix: on a shared/public broker a bare
+    // "esp32_actuator" could be taken by someone else, and the broker
+    // would keep kicking one of the two off. ACLs use the username, not this.
+    String clientId = String(PREFIX) + "-" + DEVICE_ID;
+    bool ok = strlen(MQTT_USER) ? mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASS)
+                                : mqtt.connect(clientId.c_str());
     if (ok) {
       Serial.println(" ok");
       String p(PREFIX);
@@ -176,6 +181,7 @@ void setup() {
   connectWifi();
   mqtt.setServer(BROKER_IP, BROKER_PORT);
   mqtt.setBufferSize(1024);           // gateway decisions exceed the 256-byte default
+  mqtt.setKeepAlive(60);              // default 15 s drops the link in the slow Wokwi simulator
   mqtt.setCallback(onMessage);
   connectMqtt();
 }
