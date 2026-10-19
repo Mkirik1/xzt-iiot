@@ -186,31 +186,53 @@ three threat models:
 | protocol_constrained | everything the sender actually chooses | checksums (`tcp.checksum`, `icmp.checksum`), TCP sequence state (`tcp.seq`, `tcp.ack`, `tcp.ack_raw`), Wireshark-assigned indices (`udp.stream`, `tcp.stream`, `dns.retransmit_request_in`), `arp.hw.size` |
 | strict | as above, minus TCP control flags | + `tcp.flags`, `tcp.flags.ack`, `tcp.connection.{syn,synack,fin,rst}` |
 
-Each tier is searched with 3 seeds (42, 43, 44) and reported as
-mean ± std; with one seed, search noise can make strict look marginally
-easier than protocol_constrained, which a reviewer would rightly
-question. Even averaged, strict is not guaranteed to come out lower
-than protocol_constrained: with fewer mutable features, each random
-step concentrates on the remaining ones, which can make a fixed-budget
-search slightly more efficient (seen in a synthetic-schema dry run:
-23.1% ± 3.5 vs 25.4% ± 0.2). The tiers bound what the attacker may
-change, not how good the search is; if this happens on real data,
-report it and explain it this way. Seed 42 of the permissive tier reproduces
-`adversarial_evasion.py` exactly (printed as a sanity check). Figure:
-`figures/fig11_constrained_evasion.png`.
+Each tier is searched with 3 seeds (42, 43, 44). Two numbers per tier:
 
-**Results on real Edge-IIoTset: NOT MEASURED yet.** Note for writing it
-up: several of the most-exploited features in the permissive run
-(`tcp.ack_raw`, `tcp.ack`, `tcp.checksum`, `tcp.seq`) are frozen in the
-constrained tiers, so a substantial drop is plausible, but do not
-predict the number; report whatever is measured, including a small
-drop if that is what happens.
+- **Single search run, mean ± std.** Shows search variance. It mixes
+  the threat model with search efficiency: with fewer mutable features
+  each random step concentrates on the rest, so a fixed-budget search
+  can score a stricter tier higher. On the real data it did (table
+  below), which no optimal attacker could do.
+- **Best known (headline).** Fraction of blocked attacks evaded by any
+  search whose threat model is at least as strict as this tier (all
+  seeds of this tier and of every stricter tier). An evasion found
+  under stricter constraints is automatically legal under looser ones,
+  so this is a valid lower bound on the attacker in that tier, and it
+  is monotone by construction (unit-tested).
+
+Seed 42 of the permissive tier reproduces `adversarial_evasion.py`
+exactly (printed as a sanity check; on real data it printed 0.915).
+Figure: `figures/fig11_constrained_evasion.png` (red = best known,
+gray = single run).
+
+**Results on real Edge-IIoTset (single-run numbers measured; best-known
+numbers NOT MEASURED yet, they need one rerun of the updated script):**
+
+| Tier | Frozen features | Single run (mean ± std, 3 seeds) | Best known |
+|---|---|---|---|
+| permissive | 0 of 43 | 89.5% ± 1.5 | NOT MEASURED |
+| protocol_constrained | 8 of 43 | 78.2% ± 2.1 | NOT MEASURED |
+| strict | 14 of 43 | 83.0% ± 1.5 | NOT MEASURED |
+
+Frozen in protocol_constrained on the real data: `arp.hw.size`,
+`icmp.checksum`, `tcp.ack`, `tcp.ack_raw`, `tcp.checksum`, `tcp.seq`,
+`udp.stream`, `dns.retransmit_request_in` (`tcp.stream` is not among the
+dataset's features). Strict adds `tcp.flags`, `tcp.flags.ack`,
+`tcp.connection.{syn,synack,fin,rst}`.
+
+**What this answers for the reviewer:** restricting the attacker to
+fields a real sender controls lowers single-run evasion only from
+89.5% to roughly 78–83%. The model's vulnerability is therefore not an
+artifact of the permissive threat model; most of it survives realistic
+protocol constraints. Write it that way, and keep the 91.5% / 28.0%
+adversarial-training result as the permissive-tier number it is.
 
 Still not modelled, even in the strict tier: whether the perturbed
 traffic still achieves the attack's purpose, and consistency between
-mutable fields (e.g. `tcp.len` vs the actual payload). Both make the
-constrained rates an over-estimate of a real attacker, not an
-under-estimate.
+mutable fields (e.g. `tcp.len` vs the actual payload). So the
+best-known rates are lower bounds within each feature-space threat
+model, but may over-estimate what a real attacker on the wire achieves.
+State both directions.
 
 ### Limitation to add to the cumulative list
 
@@ -433,7 +455,7 @@ inflating the headline numbers:
 |---|---|---|
 | R1 | Track 1 and Track 2 not integrated; policy loop ignores the trained model | **Fixed in v4** — ML bridge + Experiment F (34.4% → 9.4% ASR, controlled) |
 | R2 | Single-node hash chain overclaimed as blockchain | Limitation 10 stated; wording in paper must follow it. Open option: periodic anchoring of the chain head to an external timestamping service |
-| R3 | Feature-space evasion may perturb fields an attacker cannot control | **Implemented, real-data numbers NOT MEASURED yet** — `src/adversarial_evasion_constrained.py` (three threat-model tiers, see Track 1.5 below); run `python src/adversarial_evasion_constrained.py` then `python src/make_constrained_evasion_figure.py` on the real data |
+| R3 | Feature-space evasion may perturb fields an attacker cannot control | **Addressed** — `src/adversarial_evasion_constrained.py`, three threat-model tiers. Real data: single-run evasion 89.5% (permissive) vs 78.2% / 83.0% (protocol-constrained / strict), so most of the vulnerability survives realistic constraints. Best-known lower bounds still to be measured with the updated script |
 | R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | Open. Planned: hold out some attack classes from Red Agent generation and test hardened policies against them; add borderline legitimate workflows |
 | R5 | "Agent" undefined; components look like scripted modules | Open. Planned: an explicit definition (perceive → decide → act with state and a goal) and honest relabelling of components that do not meet it |
 

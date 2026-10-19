@@ -80,3 +80,21 @@ def test_tier_split_freezes_named_protocol_fields():
     _, frozen_strict = split_features(cols, TIERS["strict"])
     assert "tcp.flags" in frozen_strict
     assert split_features(cols, TIERS["permissive"]) == (cols, [])
+
+
+def test_best_known_is_monotone_even_when_single_runs_are_not():
+    """Reproduces the real-data situation: a single strict run evades more
+    than a protocol_constrained run. The pooled lower bound must still
+    rank permissive >= protocol_constrained >= strict."""
+    from adversarial_evasion_constrained import add_best_known
+    run = lambda idx: {"n_originally_blocked": 10, "evaded_sample_idx": idx}
+    tm = {
+        "permissive": {"frozen_features": [], "per_seed": [run([0, 1, 2])]},
+        "protocol_constrained": {"frozen_features": ["tcp.seq"], "per_seed": [run([0, 1])]},
+        "strict": {"frozen_features": ["tcp.seq", "tcp.flags"], "per_seed": [run([5, 6, 7, 8])]},
+    }
+    add_best_known(tm)
+    rates = [tm[t]["evasion_rate_best_known"] for t in ("permissive", "protocol_constrained", "strict")]
+    assert rates == [0.7, 0.6, 0.4]
+    assert rates == sorted(rates, reverse=True)
+    assert tm["strict"]["best_known_pooled_from_tiers"] == ["strict"]

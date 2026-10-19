@@ -20,6 +20,21 @@ are Wireshark field names, so the rules match by exact name; a field
 the rules do not name stays mutable (the conservative choice: it can
 only make the attacker stronger, never weaker).
 
+TWO WAYS TO READ THE RESULT
+1. evasion_rate_mean/std: what one search run achieves, averaged over
+   seeds. This mixes the threat model with search efficiency: with fewer
+   mutable features, each random step concentrates on the rest, so a
+   fixed-budget search can score a STRICTER tier higher. On the real
+   Edge-IIoTset it did (strict 83.0% vs protocol_constrained 78.2%),
+   which is impossible for an optimal attacker.
+2. evasion_rate_best_known: the fraction of blocked attacks evaded by
+   ANY search whose threat model is at least as strict as this tier
+   (every seed of this tier and of every stricter tier). An evasion found
+   under stricter constraints is automatically legal under looser ones,
+   so this is a valid lower bound on what an attacker in this tier can
+   do, and it is monotone across tiers by construction. Report this as
+   the headline; report (1) to show search variance.
+
 WHAT THIS STILL DOES NOT MODEL: whether a perturbed attack would still
 achieve its goal (functionality preservation), and inter-feature
 consistency beyond the frozen set (e.g. tcp.len vs the real payload).
@@ -92,7 +107,8 @@ def run_tier(model, feature_cols, bounds, attack_rows, mutable, seed):
     rng = np.random.default_rng(seed)
     n_blocked = n_evaded = 0
     iters = []
-    for orig in attack_rows:
+    evaded_idx = []
+    for i, orig in enumerate(attack_rows):
         orig_p = predict_p_malicious(model, feature_cols, orig)
         orig_decision = decide(1 - orig_p)
         adv, adv_p, history = evasion_search(model, feature_cols, bounds, orig, rng,
@@ -102,6 +118,7 @@ def run_tier(model, feature_cols, bounds, attack_rows, mutable, seed):
             n_blocked += 1
             if adv_decision == "ALLOW":
                 n_evaded += 1
+                evaded_idx.append(i)
         iters.append(len(history) - 1)
     return {
         "n_samples_tested": len(attack_rows),
@@ -109,7 +126,27 @@ def run_tier(model, feature_cols, bounds, attack_rows, mutable, seed):
         "n_successfully_evaded_to_allow": n_evaded,
         "evasion_success_rate_of_blocked": round(n_evaded / n_blocked, 4) if n_blocked else None,
         "avg_search_iterations": round(float(np.mean(iters)), 1),
+        "evaded_sample_idx": evaded_idx,
     }
+
+
+def add_best_known(threat_models):
+    """Best-known lower bound per tier: pool evasions from every run whose
+    frozen set contains this tier's frozen set (an equally or more
+    restricted attacker). Those evasions are legal in this tier too, so
+    the result is monotone: a looser tier can never score lower."""
+    for tier, res in threat_models.items():
+        mine = set(res["frozen_features"])
+        pooled, sources = set(), []
+        for other, ores in threat_models.items():
+            if mine <= set(ores["frozen_features"]):
+                sources.append(other)
+                for r in ores["per_seed"]:
+                    pooled.update(r["evaded_sample_idx"])
+        n_blocked = res["per_seed"][0]["n_originally_blocked"]
+        res["evasion_rate_best_known"] = round(len(pooled) / n_blocked, 4) if n_blocked else None
+        res["n_evaded_best_known"] = len(pooled)
+        res["best_known_pooled_from_tiers"] = sources
 
 
 def main():
@@ -149,6 +186,8 @@ def main():
             "wall_time_s": round(time.perf_counter() - t0, 1),
         }
 
+    add_best_known(out["threat_models"])
+
     if not out["threat_models"]["protocol_constrained"]["frozen_features"]:
         print("\nWARNING: no protocol-derived fields exist in this dataset's features "
               "(e.g. the synthetic generator), so the tiers cannot differ. "
@@ -156,8 +195,10 @@ def main():
 
     print("\n" + "=" * 60)
     for tier, res in out["threat_models"].items():
-        print(f"{tier:22s} evasion = {res['evasion_rate_mean']:.3f} ± {res['evasion_rate_std']:.3f} "
-              f"({len(res['frozen_features'])} frozen, {len(SEARCH_SEEDS)} search seeds)")
+        print(f"{tier:22s} best known = {res['evasion_rate_best_known']:.3f} "
+              f"({res['n_evaded_best_known']} evaded) | single run = "
+              f"{res['evasion_rate_mean']:.3f} ± {res['evasion_rate_std']:.3f} "
+              f"({len(res['frozen_features'])} frozen)")
     seed42 = out["threat_models"]["permissive"]["per_seed"][0]["evasion_success_rate_of_blocked"]
     print(f"Sanity check: permissive, seed 42 = {seed42} "
           "(should equal evasion_success_rate_of_blocked in adversarial_evasion.json)")
