@@ -17,8 +17,9 @@ Zero-Trust для периферийных устройств промышлен
 - **Track 1** — Explainable trust scoring for IIoT network traffic
   (XGBoost + SHAP), validated on the real Edge-IIoTset benchmark.
 - **Track 2** — Autonomous Zero-Trust ABAC policy self-hardening
-  platform: an 8-agent architecture with an evolutionary adversarial
-  search, a real objective-function-driven mitigation search, policy
+  platform: a closed adversarial loop with two goal-based agents (an
+  evolutionary attacker and a J-maximising defender), a reflex
+  threat-intelligence agent and five services (2.1), policy
   versioning/rollback, scheduled + event-triggered continuous
   operation, and an optional live CVE feed.
 - **Integration (new in v4)** — every Track-2 access decision now
@@ -278,19 +279,35 @@ freely) is future work.
 
 ## TRACK 2 — Autonomous Zero-Trust Self-Hardening Platform
 
-### 2.1 Eight-agent architecture
+### 2.1 Components and what "agent" means (response to reviewer R5)
 
-| Agent | File | What it actually does |
-|---|---|---|
-| **ThreatIntelAgent** | `agents/threat_intel_agent.py` | Can pull REAL current CVEs from the public NVD database (`try_live=True`), categorizes them into our safe abstract scenario types via keyword matching, weights by CVSS severity. Falls back to local `config/threat_feed.json` if network unavailable — **never crashes**. |
-| **RedAgent** | `agents/red_agent.py` | Generates SAFE abstract attack scenarios, weighted by ThreatIntelAgent's priorities. Static/random sampling mode. |
-| **EvolutionaryRedAgent** | `evolutionary_red_agent.py` | (1+λ) evolutionary search: finds the worst-case parameter combination within each attack category's declared bounds, re-searching fresh every cycle against the CURRENT policy. Genuinely adaptive, not scripted replay. |
-| **PolicyAgent** | `agents/policy_agent.py` | ABAC Decision Point — ALLOW / DENY / STEP_UP_AUTH / **QUARANTINE** |
-| **ValidationAgent** | `agents/validation_agent.py` | Computes ASR and NWFSR |
-| **BlueAgent** | `agents/blue_agent.py` | Rule-based mitigation: tightens thresholds and raises the `anomaly_risk` / `ml_risk` weights in response to the scenario types that bypassed this cycle (all 8 now have a lever — see v4 bug #1) |
-| **ExplainabilityAgent** | `agents/explainability_agent.py` | Rule-based per-decision explanation: failed conditions + top-3 trust factors |
-| **AuditAgent** | `agents/audit_agent.py` | Hash-chained ledger, structurally append-only |
-| **CoordinatorAgent** | `agents/coordinator_agent.py` | Orchestrates all of the above across N cycles |
+Reviewer R5: "agent" is undefined and the components look like
+scripted modules. Partly right. We now use the standard definition
+(Russell & Norvig): an agent perceives its environment and acts on it;
+a **goal-based** agent chooses among actions by predicting which best
+achieves an explicit objective; a **simple reflex** agent acts by fixed
+condition-action rules; anything that does not choose among actions
+toward a goal is a **service**. Each class in the code declares its
+`agent_kind` (`agents/base_agent.py`, unit-tested).
+
+| Component | File | Kind | Why |
+|---|---|---|---|
+| **BlueAgent** (objective mode, default) | `agents/blue_agent.py` | goal-based agent | Perceives the current policy, trust weights and the cycle's validation result; evaluates 108 candidate mitigations on a separate tuning scenario set; commits the one that maximises J. Its changes persist and shape its next percepts. |
+| **EvolutionaryRedAgent** | `evolutionary_red_agent.py` | goal-based agent | Queries the CURRENT policy and runs a (1+λ) search for scenario parameters that maximise evasion, within declared bounds. |
+| **BlueAgent** (rule mode, baseline) | same | simple reflex agent | Fixed "scenario X bypassed → tighten Y" rules; the pre-v4 behaviour. |
+| **ThreatIntelAgent** | `agents/threat_intel_agent.py` | simple reflex agent | Perceives an external feed (live NVD or local) and maps it to scenario priorities by fixed rules. |
+| **RedAgent** | `agents/red_agent.py` | service | Samples abstract scenarios from fixed ranges, weighted by threat priorities; never observes the policy it tests. |
+| **PolicyAgent** | `agents/policy_agent.py` | service | The ABAC policy decision point: a deterministic request → ALLOW / DENY / STEP_UP_AUTH / QUARANTINE function. |
+| **ValidationAgent** | `agents/validation_agent.py` | service | Computes ASR and NWFSR. |
+| **ExplainabilityAgent** | `agents/explainability_agent.py` | service | Per-decision explanation: failed conditions + top-3 trust factors. |
+| **AuditAgent** | `agents/audit_agent.py` | service | Append-only hash-chained log. |
+| **CoordinatorAgent** | `agents/coordinator_agent.py` | service | Fixed orchestration schedule across cycles. |
+
+**Wording for the paper:** not "an 8-agent system". Say: "a closed
+adversarial loop with two goal-based agents (an evolutionary attacker
+and a J-maximising defender), a reflex threat-intelligence agent, and
+five deterministic services". The class names keep the brief's roster
+for continuity; say so in one sentence.
 
 Canonical entry point: `self_hardening/run_agentic_multiseed.py` for
 the paper's reported numbers (10 seeds, threat-weighted Red Agent, matches the
@@ -298,7 +315,28 @@ numbers table below). For the evolutionary/live-threat variant, use
 `CoordinatorAgent.run_experiment(use_evolutionary_red=True,
 try_live_threat_intel=True)` directly, or the API/dashboard.
 
-### 2.2 Reported numbers (10 seeds, 5 cycles, threat-weighted 8-scenario Red Agent, ML-integrated trust — the CURRENT, authoritative run fig5 was generated from)
+### 2.2 Reported numbers (10 seeds, 5 cycles, threat-weighted 8-scenario Red Agent, ML-integrated trust)
+
+**Second v4 finding: the J objective was never in the loop.**
+`objective_function.py` implemented `J = αS − βL − γFPR − δO` and a
+grid search over mitigations, and the brief's contribution statement
+is built on J, but nothing outside the unit tests called it. The Blue
+Agent applied fixed rules. Its per-candidate latency was also measured
+by wall clock, so on ties (common) timer noise picked the mitigation.
+Fixed: the Blue Agent (objective mode, now the default) maximises J on
+a separate tuning scenario set (independent seeds, distinct request IDs
+so the ML bridge draws different traffic records), with latency
+measured once per search so it cannot break ties, and ties going to the
+smallest change. Deterministic (unit-tested).
+
+**J-driven Blue Agent (canonical): NOT MEASURED on real data yet.**
+Run `python run_agentic_multiseed.py` (writes
+`hardening_multiseed_summary.json`, which fig5 and Experiment E read).
+
+**Fixed-rule Blue Agent (baseline; this is the run previously reported
+as the headline).** Reproduce with `python run_agentic_multiseed.py
+--blue-mode rule` (writes `hardening_multiseed_summary_rule.json`); its
+behaviour is unchanged, so it should reproduce this table exactly:
 
 | Cycle | ASR (mean ± std) | NWFSR (mean ± std) |
 |---|---|---|
@@ -308,20 +346,28 @@ try_live_threat_intel=True)` directly, or the API/dashboard.
 | 3 | 9.6% ± 1.6% | 94.5% ± 2.7% |
 | 4 | 7.7% ± 1.4% | 93.5% ± 3.9% |
 
-**33.5% relative ASR reduction across cycles (3.9 points absolute),
-at a cost of 4.0 points of NWFSR.** Source:
-`self_hardening/results/hardening_multiseed_summary.json`. Figure:
-`self_hardening/figures/fig5_hardening_cycles.png`.
+Fixed-rule loop: **33.5% relative ASR reduction across cycles (3.9
+points absolute), at a cost of 4.0 points of NWFSR.**
+
+**What to expect from the J-driven agent (synthetic-schema dry run
+only, not a result):** it applied a change only when one step of the
+grid improved J on the tuning set, and mostly kept the policy as it
+was: less ASR reduction than the fixed rules, but no NWFSR loss. That
+is the intended behaviour of a J maximiser, and also a real limitation:
+the search is greedy, one step per cycle with steps of at most 0.06, so
+it cannot cross a region where a single small step does not help (see
+limitation 11). Report whatever the real-data comparison shows; do not
+widen the grid after seeing the result.
 
 How to read this honestly:
-- The hardening loop now starts from a much lower ASR (11.6%) because
+- Both loops start from a much lower ASR (11.6%) than pre-v4 because
   the integrated model already blocks most attacks at cycle 0. The
   loop's own contribution is the further 11.6% → 7.7%.
-- **The loop now trades availability for security.** NWFSR falls from
-  97.5% to 93.5% because the Blue Agent raises the `ml_risk` weight and
-  the classifier's real benign-traffic errors (~15% FPR, Track 1) then
-  weigh more. Report this trade-off openly; it is exactly the
-  security/availability tension the J objective is meant to manage.
+- **The fixed-rule loop trades availability for security.** NWFSR
+  falls from 97.5% to 93.5% because the rules raise the `ml_risk`
+  weight and the classifier's real benign-traffic errors (~15% FPR,
+  Track 1) then weigh more. That is exactly the tension J is meant to
+  manage, which is why the J-driven agent is the canonical one.
   The old 100%-NWFSR table had no such tension only because the model
   was not in the loop.
 - Cycle 1 ASR is not lower than cycle 0 (11.7% vs 11.6%): the decline
@@ -333,7 +379,8 @@ rejected submission reported 37.2% ± 2.6% → 15.3% ± 2.1% with 100%
 NWFSR. That run never consulted the trained model. It can be cited only
 as the "ABAC-only" comparison point, clearly labelled.
 
-**Use this table for the paper.** The evolutionary/live-CVE mode is a
+**For the paper, report both Blue Agent modes side by side once the
+J-driven run exists.** The evolutionary/live-CVE mode is a
 real, tested, working *extension* (great for a demo, a "future
 directions realized" paragraph, or a follow-up paper) but was run with
 different, non-standardized parameters during development — don't mix
@@ -349,7 +396,8 @@ cleanly across the same 10 seeds first.
 | C. ZT + Explainability | Yes | No | Yes | No | No | 34.4% | 100% |
 | D. ZT + Audit | Yes | No | No | Yes | No | 34.4% | 100% |
 | **F. ZT + Track-1 model** | Yes | **Yes** | No | No | No | **9.4%** | **100%** |
-| E. Full XZT-IIoT | Yes | Yes | Yes | Yes | Yes | 7.7% ± 1.4% | 93.5% |
+| E. Full XZT-IIoT, J-driven Blue Agent | Yes | Yes | Yes | Yes | Yes (J) | NOT MEASURED | NOT MEASURED |
+| E-rule. Full, fixed-rule Blue Agent | Yes | Yes | Yes | Yes | Yes (rules) | 7.7% ± 1.4% | 93.5% |
 
 Source: `self_hardening/results/ablation_table.json` / `.csv`.
 
@@ -357,8 +405,8 @@ Source: `self_hardening/results/ablation_table.json` / `.csv`.
   scenarios, same Cycle-0 policy; the only difference is whether the
   trust engine consults the model. ASR 34.4% → 9.4% (−73% relative),
   NWFSR unchanged at 100%.
-- A–D and F are single-seed (42) static evaluations; E is the 10-seed
-  mean after 5 cycles. Say so in the table caption.
+- A–D and F are single-seed (42) static evaluations; E and E-rule are
+  10-seed means after 5 cycles. Say so in the table caption.
 - C and D intentionally match B: explainability and audit are
   observability layers, they do not change decisions. Their cost is
   latency (C: 0.005 ms/decision, D: 0.013 ms/decision in the latest run).
@@ -366,10 +414,12 @@ Source: `self_hardening/results/ablation_table.json` / `.csv`.
 ### 2.4 New capabilities added this session (real, tested, extending beyond the paper's minimum claim)
 
 **Objective function search (`objective_function.py`)** — implements
-`J = αS − βL − γFPR − δO`, grid-searches threshold candidates, applies
-the highest-J winner. Tested: `apply_candidate` correctly commits the
-winning candidate; DENY-everything is structurally penalized (unit
-test `test_deny_everything_is_penalized`).
+`J = αS − βL − γFPR − δO` over 108 candidates (trust, integrity and
+anomaly threshold steps of 0/0.03/0.06, STEP_UP on zone mismatch, and
+`ml_risk` weight +0/+0.05). Since v4 it drives the default Blue Agent
+(before v4 it was only exercised by unit tests). Tested: deterministic
+choice, the live policy is untouched during search, DENY-everything is
+structurally penalized.
 
 **Policy versioning + rollback (`policy_versioning.py`)** — full
 PROPOSED→VALIDATED→APPROVED→DEPLOYED state machine, diff between
@@ -393,7 +443,7 @@ req/s on the ABAC decision point: p50≈0.002ms, throughput≈400K req/s
 (pure in-process Python, no network hop — cite as decision-logic
 latency only, not end-to-end system latency).
 
-**33 pytest tests, all passing on real Edge-IIoTset** (`tests/test_xzt_iiot.py`) — trust
+**37 pytest tests, all passing** (33 confirmed on the real Edge-IIoTset; 4 R5/J tests added after) (`tests/test_xzt_iiot.py`) — trust
 scoring, ML-bridge integration (scores differ by scenario, are not
 constant, and a schema mismatch fails loudly), ABAC decisions incl. QUARANTINE/STEP_UP_AUTH, Red Agent scope
 (asserts no networking imports present — a structural safety check,
@@ -478,6 +528,8 @@ inflating the headline numbers:
 8. **ML/ABAC pairing is a modelling assumption.** Each simulated ABAC request is paired with a real held-out Edge-IIoTset record of the class its scenario maps to (table in "What changed in v4"). The traffic and the identity/device attributes therefore do not come from one physical session. The mapping is documented and fixed, not tuned, but a reviewer may question individual rows. The planned hardware testbed (below) removes this assumption.
 9. `abnormal_access_time` is invisible to the ML factor by design; its bypasses can only be closed by ABAC context rules.
 10. The audit ledger is a single-node SHA-256 hash chain: tamper-evident, not a distributed blockchain (no consensus, replication or external anchoring). Say "hash-chained audit log" in the paper; do not claim blockchain-level guarantees.
+11. The J-driven Blue Agent is a greedy, one-step search over a small fixed grid (steps ≤ 0.06 per cycle). It can stall where no single small step improves J on the tuning set, even if a larger or multi-step change would. J's weights (α=1, β=0.05, γ=1, δ=0.5) are design choices, not tuned; a different weighting changes which mitigations win.
+12. Only two components are goal-based agents (2.1); the rest are a reflex agent and services. Describe the system accordingly.
 
 ### 2.8 Reviewer criticisms — status
 
@@ -487,7 +539,7 @@ inflating the headline numbers:
 | R2 | Single-node hash chain overclaimed as blockchain | Limitation 10 stated; wording in paper must follow it. Open option: periodic anchoring of the chain head to an external timestamping service |
 | R3 | Feature-space evasion may perturb fields an attacker cannot control | **Addressed** — three threat-model tiers on 200 held-out attacks. Undefended model: a strict-tier attacker (14 of 43 fields frozen) with 3 restarts evades all 200. Adversarial training cuts strict-tier evasion to 26.5% and permissive to 55.0% (best known); single-run figures 17.3% / 28.8% |
 | R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | Open. Planned: hold out some attack classes from Red Agent generation and test hardened policies against them; add borderline legitimate workflows |
-| R5 | "Agent" undefined; components look like scripted modules | Open. Planned: an explicit definition (perceive → decide → act with state and a goal) and honest relabelling of components that do not meet it |
+| R5 | "Agent" undefined; components look like scripted modules | **Addressed** — standard definition (Russell & Norvig), every component labelled with its kind in code and in 2.1: two goal-based agents, one reflex agent, five services. The defender is now genuinely goal-based: the J objective, previously unused by the loop, drives it. J-driven real-data numbers NOT MEASURED until rerun |
 
 ### 2.9 Hardware testbed (diploma prototype, planned)
 
@@ -545,7 +597,7 @@ Track 1 commands unchanged from the prior handoff (`src/train_trust_model.py` et
 
 1. Abstract + Introduction
 2. Related Work (4 clusters)
-3. Methodology — 3a: XGBoost+SHAP trust scoring; 3b: integration of the model into the ABAC trust score (`ml_risk`, held-out record sampling, scenario→class table); 3c: 8-agent self-hardening loop (mention evolutionary/live-CVE as implemented extensions); 3d: shared hash-chained audit log
+3. Methodology — 3a: XGBoost+SHAP trust scoring; 3b: integration of the model into the ABAC trust score (`ml_risk`, held-out record sampling, scenario→class table); 3c: the self-hardening loop with an explicit agent definition and the J-driven defender (2.1; mention evolutionary/live-CVE as implemented extensions); 3d: shared hash-chained audit log
 4. Results — Track 1 (fig1-4,6), Track 1.5 (fig8-9), Track 2 (fig5, ablation table A–F with B vs F as the integration result)
 5. Discussion — precision/recall trade-off, cost of explainability, the security/availability trade-off now visible in NWFSR, ML-blind scenarios (abnormal_access_time)
 6. Limitations — full cumulative list (Track 1 + 2.7 above)

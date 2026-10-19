@@ -2,7 +2,7 @@
 run_agentic_multiseed.py
 ----------------------------
 The canonical, most complete experiment runner: drives the full
-8-agent architecture (ThreatIntelAgent through CoordinatorAgent)
+closed loop (ThreatIntelAgent through CoordinatorAgent)
 across N_SEEDS independent seeds, for a statistically robust ASR/NWFSR
 result. Supersedes run_multiseed.py (which used the procedural
 hardening_loop.run() directly) -- kept for comparison/backward
@@ -10,6 +10,7 @@ compatibility, but THIS script is what the paper's reported numbers
 and figure should come from, since it exercises every named agent.
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -25,18 +26,28 @@ SEEDS = [42, 101, 202, 303, 404, 505, 606, 707, 808, 909]
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--blue-mode", choices=["objective", "rule"], default="objective",
+                    help="objective (default): Blue Agent maximises J on a separate tuning set; "
+                         "rule: the pre-v4 fixed if-bypassed-then-tighten rules, for comparison")
+    args = ap.parse_args()
+    out_name = ("hardening_multiseed_summary.json" if args.blue_mode == "objective"
+                else "hardening_multiseed_summary_rule.json")
+
     all_asr = np.zeros((N_SEEDS, N_CYCLES))
     all_nwfsr = np.zeros((N_SEEDS, N_CYCLES))
     audit_report = []
+    mitigations = {}
 
     for i, seed in enumerate(SEEDS):
         print(f"\n=== Agentic run {i+1}/{N_SEEDS} (seed={seed}) ===")
-        coord = CoordinatorAgent()
+        coord = CoordinatorAgent(blue_mode=args.blue_mode)
         result = coord.run_experiment(seed=seed, write_explanations=(i == 0), verbose=True)
         cycle_results = result.output["cycle_results"]
         for c, r in enumerate(cycle_results):
             all_asr[i, c] = r["asr"]
             all_nwfsr[i, c] = r["nwfsr"]
+        mitigations[str(seed)] = [r["mitigation_changes"] for r in cycle_results]
         audit_report.append({"seed": seed, "audit_valid": result.output["audit_valid"],
                               "audit_blocks": result.output["audit_blocks"]})
         if i == 0:
@@ -48,7 +59,8 @@ def main():
 
     summary = {
         "n_seeds": N_SEEDS, "seeds": SEEDS, "n_cycles": N_CYCLES,
-        "architecture": "8-agent (ThreatIntel, Red, Blue, Validation, Policy, "
+        "blue_mode": args.blue_mode,
+        "architecture": "8 components named *Agent (ThreatIntel, Red, Blue, Validation, Policy, "
                          "Explainability, Audit, Coordinator)",
         "asr_mean_by_cycle": asr_mean.round(4).tolist(),
         "asr_std_by_cycle": asr_std.round(4).tolist(),
@@ -70,9 +82,10 @@ def main():
     print(f"Audit chains valid across all seeds: {all(r['audit_valid'] for r in audit_report)}")
 
     RESULTS.mkdir(exist_ok=True)
-    with open(RESULTS / "hardening_multiseed_summary.json", "w") as f:
+    summary["mitigations_by_seed"] = mitigations
+    with open(RESULTS / out_name, "w") as f:
         json.dump(summary, f, indent=2)
-    print(f"\nSaved -> {RESULTS / 'hardening_multiseed_summary.json'}")
+    print(f"\nSaved -> {RESULTS / out_name}")
 
 
 if __name__ == "__main__":

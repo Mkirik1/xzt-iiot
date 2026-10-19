@@ -9,15 +9,28 @@ where S = security effectiveness (1-ASR), L = normalized authorization
 latency, FPR = false positive rate on normal traffic (1-NWFSR),
 O = operational disruption (same as FPR here, since STEP_UP_AUTH
 friction isn't separately modeled -- kept as a distinct term because
-the brief specifies it, with a placeholder that can be extended, e.g.
-STEP_UP_AUTH weighted as partial disruption).
+the brief specifies it).
 
-The Blue Agent searches candidate policy adjustments (grid over
-threshold deltas) and selects the one maximizing J, rather than always
-applying a fixed-size step -- this is what makes it a real (if simple)
-optimization search rather than a hardcoded rule, and it structurally
-prevents "DENY EVERYTHING": a candidate that tanks NWFSR is penalized
-by the FPR/O terms and will not win even if it drives ASR to zero.
+The Blue Agent (objective mode, agents/blue_agent.py) perceives the
+current policy, generates candidate mitigations, measures each one's
+ASR/NWFSR on a TUNING scenario set that is separate from the scenarios
+the cycle is evaluated on, and commits the candidate with the highest
+J. A candidate that drives ASR to zero by denying legitimate work loses
+on the FPR/O terms, so "DENY EVERYTHING" cannot win.
+
+HISTORY: before the v4 revision this search existed and was unit-tested
+but was never called by the hardening loop; the Blue Agent only applied
+fixed if-bypassed-then-tighten rules. The paper's contribution statement
+is built on J, so the loop now actually optimises it.
+
+DETERMINISM: an earlier version measured wall-clock latency separately
+for every candidate. Many candidates tie on ASR/NWFSR, so timer noise
+decided which mitigation was applied, and two identical runs could
+diverge. Thresholds do not change how much work a decision takes, so L
+is now measured once per search and is the same for every candidate:
+it is reported, but it cannot affect the choice. Ties go to the
+earliest candidate in the grid, which is ordered from the smallest
+change upward.
 """
 
 import copy
@@ -25,13 +38,16 @@ import itertools
 import time
 from dataclasses import dataclass
 
-import yaml
-
 from policy_engine import PolicyEngine
-from trust_engine import TrustEngine
 from validation_agent import validate
 
 DEFAULT_WEIGHTS = {"alpha": 1.0, "beta": 0.05, "gamma": 1.0, "delta": 0.5}
+
+# Candidate grid, each axis ordered smallest change first (tie-break order).
+DELTA_OPTIONS = [0.0, 0.03, 0.06]
+STEP_UP_OPTIONS = [False, True]
+ML_WEIGHT_OPTIONS = [0.0, 0.05]
+MAX_ML_RISK_WEIGHT = 0.65
 
 
 def objective_J(asr: float, nwfsr: float, latency_ms: float,
@@ -54,48 +70,78 @@ class Candidate:
     nwfsr: float
     latency_ms: float
     J: float
+    delta_ml_weight: float = 0.0
+
+    def describe(self) -> str:
+        parts = []
+        if self.delta_trust:
+            parts.append(f"min_trust_score +{self.delta_trust}")
+        if self.delta_integrity:
+            parts.append(f"min_device_integrity +{self.delta_integrity}")
+        if self.delta_anomaly:
+            parts.append(f"max_anomaly_score -{self.delta_anomaly}")
+        if self.enable_step_up:
+            parts.append("STEP_UP_AUTH on zone mismatch")
+        if self.delta_ml_weight:
+            parts.append(f"ml_risk weight +{self.delta_ml_weight}")
+        return ", ".join(parts) if parts else "no change"
+
+
+def _clone_engine(policy_engine: PolicyEngine) -> PolicyEngine:
+    """Deep-copy policies and trust weights, but SHARE the ML bridge:
+    copying the trained model and its held-out split for every candidate
+    would be slow and pointless (it is read-only)."""
+    memo = {}
+    bridge = getattr(policy_engine.trust_engine, "ml_bridge", None)
+    if bridge is not None:
+        memo[id(bridge)] = bridge
+    return copy.deepcopy(policy_engine, memo)
 
 
 def _apply_candidate(policy_engine: PolicyEngine, delta_trust, delta_integrity,
-                      delta_anomaly, enable_step_up):
+                      delta_anomaly, enable_step_up, delta_ml_weight=0.0):
     for p in policy_engine.policies:
         p.conditions.min_trust_score = min(0.95, max(0.1, p.conditions.min_trust_score + delta_trust))
         p.conditions.min_device_integrity = min(0.95, max(0.1, p.conditions.min_device_integrity + delta_integrity))
         p.conditions.max_anomaly_score = min(0.9, max(0.1, p.conditions.max_anomaly_score - delta_anomaly))
         if enable_step_up:
             p.conditions.require_step_up_if_zone_mismatch = True
+    if delta_ml_weight:
+        w = policy_engine.trust_engine.weights
+        w.ml_risk = min(MAX_ML_RISK_WEIGHT, w.ml_risk + delta_ml_weight)
 
 
 def apply_candidate(policy_engine: PolicyEngine, candidate: Candidate):
-    """Apply a winning candidate's deltas to the actual (non-copy)
-    policy engine -- search_best_candidate only evaluates deepcopies
-    internally, so the caller must explicitly commit the winner."""
+    """Commit a winning candidate to the actual (non-copy) engine --
+    search_best_candidate only evaluates clones internally."""
     _apply_candidate(policy_engine, candidate.delta_trust, candidate.delta_integrity,
-                      candidate.delta_anomaly, candidate.enable_step_up)
+                      candidate.delta_anomaly, candidate.enable_step_up,
+                      candidate.delta_ml_weight)
 
 
 def search_best_candidate(policy_engine: PolicyEngine, attack_reqs: list, normal_reqs: list,
-                           weights: dict = DEFAULT_WEIGHTS) -> Candidate:
-    """Grid search over small threshold deltas; evaluates each candidate's
-    REAL measured ASR/NWFSR/latency (not estimated), picks the highest J.
-    This is genuinely evaluating each candidate against the actual
-    scenario suite -- a small but real Pareto-style search, not a
-    single-rule heuristic."""
-    delta_options = [0.0, 0.03, 0.06]
-    step_up_options = [False, True]
-    best: Candidate = None
+                           weights: dict = DEFAULT_WEIGHTS, return_all: bool = False):
+    """Evaluate every candidate's REAL measured ASR/NWFSR on the given
+    scenarios and return the highest-J one (ties: smallest change).
+    The ML-weight axis is only searched when the trust engine actually
+    consults the Track-1 model; otherwise it would have no effect."""
+    uses_ml = getattr(policy_engine.trust_engine, "ml_bridge", None) is not None
+    ml_options = ML_WEIGHT_OPTIONS if uses_ml else [0.0]
 
-    for dt, di, da, su in itertools.product(delta_options, delta_options, delta_options, step_up_options):
-        trial_engine = copy.deepcopy(policy_engine)
-        _apply_candidate(trial_engine, dt, di, da, su)
+    t0 = time.perf_counter()
+    validate(policy_engine, attack_reqs, normal_reqs)
+    latency_ms = (time.perf_counter() - t0) / max(1, len(attack_reqs) + len(normal_reqs)) * 1000
 
-        t0 = time.perf_counter()
-        result = validate(trial_engine, attack_reqs, normal_reqs)
-        latency_ms = (time.perf_counter() - t0) / (len(attack_reqs) + len(normal_reqs)) * 1000
-
+    best, evaluated = None, []
+    for dt, di, da, su, dm in itertools.product(DELTA_OPTIONS, DELTA_OPTIONS, DELTA_OPTIONS,
+                                                STEP_UP_OPTIONS, ml_options):
+        trial = _clone_engine(policy_engine)
+        _apply_candidate(trial, dt, di, da, su, dm)
+        result = validate(trial, attack_reqs, normal_reqs)
         J = objective_J(result.asr, result.nwfsr, latency_ms, weights)
-        cand = Candidate(dt, di, da, su, result.asr, result.nwfsr, latency_ms, J)
+        cand = Candidate(dt, di, da, su, result.asr, result.nwfsr, latency_ms, J, dm)
+        evaluated.append(cand)
         if best is None or cand.J > best.J:
             best = cand
 
-    return best
+    return (best, evaluated) if return_all else best

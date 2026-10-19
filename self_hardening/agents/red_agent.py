@@ -18,6 +18,7 @@ import red_agent as _engine  # noqa: E402  (self_hardening/red_agent.py)
 class RedAgent(BaseAgent):
     agent_id = "red_agent"
     name = "Red Agent"
+    agent_kind = "service"   # samples scenarios from fixed ranges; never observes the policy it tests
 
     def run(self, base_n_per_type: int, threat_weights: dict, seed: int) -> AgentResult:
         self.status = "running"

@@ -18,6 +18,7 @@ from policy_engine import PolicyEngine  # noqa: E402
 class PolicyAgent(BaseAgent):
     agent_id = "policy_agent"
     name = "Policy Agent"
+    agent_kind = "service"   # the policy decision point: a deterministic request -> decision function
 
     def __init__(self, engine: PolicyEngine):
         super().__init__()

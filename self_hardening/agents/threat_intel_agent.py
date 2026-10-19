@@ -156,6 +156,7 @@ def fetch_live_nvd_feed_hard_timeout(keyword: str = "industrial control system",
 class ThreatIntelAgent(BaseAgent):
     agent_id = "threat_intel_agent"
     name = "Threat Intelligence Agent"
+    agent_kind = "simple_reflex_agent"   # perceives an external feed (NVD or local), maps it to scenario priorities by fixed rules
 
     def __init__(self, feed_path: Path = DEFAULT_FEED):
         super().__init__()

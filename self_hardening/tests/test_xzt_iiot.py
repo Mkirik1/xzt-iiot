@@ -424,3 +424,56 @@ class TestThreatIntelAgent:
             tia.fetch_live_nvd_feed_hard_timeout(hard_timeout_s=1.0)
         elapsed = time.time() - t0
         assert elapsed < 2.0, f"hard timeout did not bound wait time: took {elapsed:.1f}s"
+
+
+# ---- R5: what counts as an agent; J-driven Blue Agent ----
+
+class TestAgentDefinitionAndObjectiveBlue:
+    def test_every_component_declares_an_honest_kind(self):
+        from agents.base_agent import AGENT_KINDS
+        from agents.audit_agent import AuditAgent
+        from agents.blue_agent import BlueAgent
+        from agents.coordinator_agent import CoordinatorAgent
+        from agents.explainability_agent import ExplainabilityAgent
+        from agents.policy_agent import PolicyAgent
+        from agents.red_agent import RedAgent
+        from agents.threat_intel_agent import ThreatIntelAgent
+        from agents.validation_agent import ValidationAgent
+        from evolutionary_red_agent import EvolutionaryRedAgent
+        classes = [AuditAgent, BlueAgent, CoordinatorAgent, ExplainabilityAgent, PolicyAgent,
+                   RedAgent, ThreatIntelAgent, ValidationAgent, EvolutionaryRedAgent]
+        assert all(c.agent_kind in AGENT_KINDS for c in classes)
+        goal_based = {c.__name__ for c in classes if c.agent_kind == "goal_based_agent"}
+        assert goal_based == {"BlueAgent", "EvolutionaryRedAgent"}
+        assert BlueAgent(mode="rule").agent_kind == "simple_reflex_agent"
+
+    def test_objective_search_is_deterministic(self, policy_engine):
+        attack = generate_attack_scenarios(n_per_type=5, seed=3)
+        normal = generate_normal_scenarios(n=10, seed=3)
+        a = search_best_candidate(policy_engine, attack, normal)
+        b = search_best_candidate(policy_engine, attack, normal)
+        assert (a.describe(), a.asr, a.nwfsr) == (b.describe(), b.asr, b.nwfsr)
+
+    def test_search_does_not_touch_the_live_policy_or_copy_the_model(self, policy_engine):
+        from objective_function import _clone_engine
+        before = [(p.conditions.min_trust_score, p.conditions.max_anomaly_score)
+                  for p in policy_engine.policies]
+        search_best_candidate(policy_engine, generate_attack_scenarios(n_per_type=3, seed=4),
+                              generate_normal_scenarios(n=5, seed=4))
+        after = [(p.conditions.min_trust_score, p.conditions.max_anomaly_score)
+                 for p in policy_engine.policies]
+        assert before == after
+        sentinel = object()
+        policy_engine.trust_engine.ml_bridge = sentinel
+        clone = _clone_engine(policy_engine)
+        assert clone.trust_engine.ml_bridge is sentinel
+        assert clone.trust_engine.weights is not policy_engine.trust_engine.weights
+
+    def test_coordinator_objective_mode_uses_separate_tuning_set(self):
+        from agents.coordinator_agent import CoordinatorAgent
+        res = CoordinatorAgent(blue_mode="objective").run_experiment(
+            seed=7, n_cycles=2, n_per_attack_type_base=3, n_normal=5, verbose=False)
+        rec = res.output["cycle_results"][0]
+        assert rec["blue_mode"] == "objective"
+        assert rec["mitigation_changes"][0].startswith("Applied highest-J candidate")
+        assert res.output["audit_valid"]

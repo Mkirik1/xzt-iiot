@@ -164,11 +164,13 @@ def run_experiment_f():
     return {"asr": round(result.asr, 4), "nwfsr": round(result.nwfsr, 4)}
 
 
-def run_experiment_e():
-    """Full XZT-IIoT: read the already-computed 5-cycle, 5-seed
-    multi-seed result (final cycle) -- do not recompute/duplicate,
-    single source of truth is hardening_multiseed_summary.json."""
-    with open(RESULTS / "hardening_multiseed_summary.json") as f:
+def run_experiment_e(filename="hardening_multiseed_summary.json"):
+    """Full XZT-IIoT: read the already-computed multi-seed result (final
+    cycle) -- do not recompute/duplicate; the single source of truth is
+    the summary file written by run_agentic_multiseed.py. The default
+    file is the J-driven (objective-mode) Blue Agent; pass
+    hardening_multiseed_summary_rule.json for the fixed-rule baseline."""
+    with open(RESULTS / filename) as f:
         summary = json.load(f)
     return {"asr": summary["asr_mean_by_cycle"][-1], "asr_std": summary["asr_std_by_cycle"][-1],
             "nwfsr": summary["nwfsr_mean_by_cycle"][-1], "n_cycles": summary["n_cycles"],
@@ -201,6 +203,15 @@ def main():
     exp_e = run_experiment_e()
     print(f"  ASR={exp_e['asr']:.3f}±{exp_e['asr_std']:.3f}  NWFSR={exp_e['nwfsr']:.3f} "
           f"(after {exp_e['n_cycles']} cycles, {exp_e['n_seeds']} seeds)")
+
+    exp_e_rule = None
+    if (RESULTS / "hardening_multiseed_summary_rule.json").exists():
+        exp_e_rule = run_experiment_e("hardening_multiseed_summary_rule.json")
+        print(f"  (rule-based Blue Agent for comparison: ASR={exp_e_rule['asr']:.3f}"
+              f"±{exp_e_rule['asr_std']:.3f}  NWFSR={exp_e_rule['nwfsr']:.3f})")
+    else:
+        print("  (rule-based Blue Agent comparison NOT MEASURED: run "
+              "`python run_agentic_multiseed.py --blue-mode rule` first)")
 
     print("Running Experiment F (ZT ABAC + Track-1 ML model, static)...")
     exp_f = run_experiment_f()
@@ -235,8 +246,14 @@ def main():
         },
         "Experiment E (Full XZT-IIoT)": {
             "Zero_Trust": "Yes", "Dynamic_Trust": "Yes", "Explainability": "Yes",
-            "Blockchain_Audit": "Yes", "Adaptive_AI": "Yes",
+            "Blockchain_Audit": "Yes", "Adaptive_AI": "Yes (J-driven)", "ML_Model_Integrated": "Yes",
             "ASR": f"{exp_e['asr']}±{exp_e['asr_std']}", "NWFSR": exp_e["nwfsr"],
+        },
+        "Experiment E-rule (Full, fixed-rule Blue Agent)": {
+            "Zero_Trust": "Yes", "Dynamic_Trust": "Yes", "Explainability": "Yes",
+            "Blockchain_Audit": "Yes", "Adaptive_AI": "Yes (fixed rules)", "ML_Model_Integrated": "Yes",
+            "ASR": f"{exp_e_rule['asr']}±{exp_e_rule['asr_std']}" if exp_e_rule else "NOT MEASURED",
+            "NWFSR": exp_e_rule["nwfsr"] if exp_e_rule else "NOT MEASURED",
         },
         "Experiment F (ZT ABAC + Track-1 ML model, static)": {
             "Zero_Trust": "Yes", "Dynamic_Trust": "Yes", "Explainability": "No",

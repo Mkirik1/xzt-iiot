@@ -1,20 +1,23 @@
 """
 coordinator_agent.py (agents package)
 ------------------------------------------
-Orchestrates the full 8-agent self-hardening cycle:
+Orchestrates the closed self-hardening loop:
 
   ThreatIntelAgent -> RedAgent -> PolicyAgent (x2: attack + normal)
     -> ValidationAgent -> ExplainabilityAgent -> BlueAgent -> AuditAgent
   repeated for N_CYCLES, with a fresh TrustEngine/PolicyEngine per
   experiment run (per seed).
 
-This supersedes the procedural hardening_loop.run() function with an
-explicit multi-agent architecture matching the brief's Section 30
-agent roster (ThreatIntelAgent, RedAgent, BlueAgent, ValidationAgent,
-PolicyAgent, ExplainabilityAgent, AuditAgent, CoordinatorAgent = 8
-agents). The underlying logic is IDENTICAL to hardening_loop.py --
-this is an architectural reorganization, not a behavior change, so
-results are reproducible against the numbers already reported.
+Eight components carry "Agent" in their class names (the brief's
+Section 30 roster), but not all of them are agents in the standard
+sense; each class states its agent_kind, and base_agent.py gives the
+definition used. See HANDOFF.md section 2.1.
+
+Blue Agent mode (v4): "objective" (default) selects mitigations by
+maximising J on a TUNING scenario set drawn independently of the
+scenarios each cycle is evaluated on, so the defender is not tuned on
+its own test. "rule" reproduces the pre-v4 fixed-rule behaviour (which
+is also what hardening_loop.run() still does).
 """
 
 import hashlib
@@ -50,21 +53,24 @@ def _policy_snapshot_hash(engine: PolicyEngine) -> str:
         "min_device_integrity": p.conditions.min_device_integrity,
         "max_anomaly_score": p.conditions.max_anomaly_score,
         "require_step_up_if_zone_mismatch": p.conditions.require_step_up_if_zone_mismatch,
-    } for p in engine.policies], sort_keys=True)
+    } for p in engine.policies] + [{"trust_weights": vars(engine.trust_engine.weights)}],
+        sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 class CoordinatorAgent(BaseAgent):
     agent_id = "coordinator_agent"
     name = "Coordinator Agent"
+    agent_kind = "service"   # fixed orchestration schedule, no goal of its own
 
-    def __init__(self):
+    def __init__(self, blue_mode: str = "objective"):
         super().__init__()
+        self.blue_mode = blue_mode
         self.threat_intel = ThreatIntelAgent()
         self.red = RedAgent()
         self.evolutionary_red = EvolutionaryRedAgent()
         self.validation = ValidationAgent()
-        self.blue = BlueAgent()
+        self.blue = BlueAgent(mode=blue_mode)
         self.audit = AuditAgent()
         # policy_agent, explainability_agent are created per-run below
         # since they hold references to a per-run TrustEngine/PolicyEngine
@@ -93,6 +99,12 @@ class CoordinatorAgent(BaseAgent):
             print(f"  [ThreatIntelAgent] {ti_result.reasoning_summary}")
 
         normal_reqs = generate_normal_scenarios(n=n_normal, seed=seed + 1000)
+        # Tuning set for the objective-mode Blue Agent: same generators,
+        # independent seeds, and request IDs prefixed so the ML bridge
+        # draws different held-out traffic records than for evaluation.
+        tuning_normal = generate_normal_scenarios(n=n_normal, seed=seed + 2000)
+        for r in tuning_normal:
+            r.request_id = "tune_" + r.request_id
         cycle_results = []
         sample_explanations = []
 
@@ -134,13 +146,21 @@ class CoordinatorAgent(BaseAgent):
                       "policy_hash_before_mitigation": old_hash}
 
             if cycle < n_cycles - 1:
-                blue_result = self.blue.run(policy_engine, trust_engine, result, cycle)
+                tuning_attack = None
+                if self.blue_mode == "objective":
+                    tuning_attack = self.red.run(n_per_attack_type_base, threat_weights,
+                                                 seed=seed * 100 + cycle + 50_000).output
+                    for r in tuning_attack:
+                        r.request_id = "tune_" + r.request_id
+                blue_result = self.blue.run(policy_engine, trust_engine, result, cycle,
+                                            tuning_attack=tuning_attack, tuning_normal=tuning_normal)
                 new_hash = _policy_snapshot_hash(policy_engine)
-                record["mitigation_changes"] = blue_result.output.changes
+                record["mitigation_changes"] = blue_result.output["changes"]
+                record["blue_mode"] = self.blue_mode
                 record["policy_hash_after_mitigation"] = new_hash
                 self.audit.append({"event": "POLICY_VERSION_UPDATE", "cycle": cycle,
                                     "old_policy_hash": old_hash, "new_policy_hash": new_hash,
-                                    "changes": blue_result.output.changes})
+                                    "changes": blue_result.output["changes"]})
             else:
                 record["mitigation_changes"] = []
                 record["policy_hash_after_mitigation"] = old_hash
@@ -163,5 +183,5 @@ class CoordinatorAgent(BaseAgent):
                     "threat_intel_source": threat_intel_source},
             confidence=1.0,
             reasoning_summary=(f"Coordinated {n_cycles}-cycle self-hardening run (seed={seed}) "
-                                f"across 8 agents; final ASR="
+                                f"across 8 components (blue_mode={self.blue_mode}); final ASR="
                                 f"{cycle_results[-1]['asr']:.3f}, audit_valid={audit_result.output['valid']}."))

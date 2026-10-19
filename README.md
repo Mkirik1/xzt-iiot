@@ -12,9 +12,9 @@ Two independent, measured contributions:
    validated on the real [Edge-IIoTset](https://www.kaggle.com/datasets/mohamedamineferrag/edgeiiotset-cyber-security-dataset-of-iot-iiot)
    benchmark — including a black-box adversarial evasion study and an
    adversarial-training defense.
-2. **An 8-agent autonomous Zero-Trust ABAC self-hardening platform**
-   (ThreatIntel / Red / Blue / Validation / Policy / Explainability / Audit /
-   Coordinator agents), with a full ablation study isolating each
+2. **A closed-loop Zero-Trust ABAC self-hardening platform** (two goal-based agents, a reflex threat-intelligence agent and five services; see HANDOFF.md 2.1)
+   (components: ThreatIntel / Red / Blue / Validation / Policy / Explainability /
+   Audit / Coordinator), with a full ablation study isolating each
    component's measured contribution.
 
 ## Key results
@@ -22,9 +22,13 @@ Two independent, measured contributions:
 | | |
 |---|---|
 | Trust model | XGBoost, F1 = 0.985, ROC-AUC = 0.993 on real Edge-IIoTset |
-| Adversarial evasion (black-box) | 91.5% success rate against the undefended model |
-| + Adversarial training defense | Evasion drops to 28.0%, with no measured loss in clean-data F1 |
-| Self-hardening (5 seeds, 5 cycles) | Attack Success Rate 38.8% → 15.3% (60.5% relative reduction), Normal Workflow Success Rate held at 100% throughout |
+| Model ↔ policy integration | Same scenarios and policy, ABAC-only vs. ABAC + the trained model: attack success 34.4% → 9.4%, normal workflows unaffected |
+| Adversarial evasion (black-box, 200 held-out attacks) | Undefended model: 90.3% single-run evasion; with 3 restarts, all 200 evaded, even when 14 protocol fields are frozen |
+| + Adversarial training defense | Best-known evasion 100% → 55.0% (permissive) and 100% → 26.5% (strict tier: protocol fields and TCP flags frozen); no clean-data F1 decrease observed |
+| Self-hardening (10 seeds, 5 cycles, fixed-rule defender) | Attack success 11.6% → 7.7%, normal workflow success 97.5% → 93.5% |
+| Self-hardening, J-driven defender | Not yet measured on real data |
+
+See `HANDOFF.md` for how each number was produced and what it does not show.
 
 All figures in `figures/` and `self_hardening/figures/` are generated
 directly from the code in this repository — nothing is hand-edited.
@@ -33,10 +37,10 @@ directly from the code in this repository — nothing is hand-edited.
 
 ```
 src/                    Track 1: trust scoring, SHAP, adversarial evasion/defense, figures
-self_hardening/          Track 2: 8-agent architecture, API + dashboard, tests
+self_hardening/          Track 2: self-hardening loop, API + dashboard, tests
   agents/                 Individual agent implementations
   api/                     FastAPI backend + web dashboard
-  tests/                   pytest suite (28 tests)
+  tests/                   pytest suite (37 tests)
 data/                    Dataset location (not included — see below)
 results/, figures/       Generated outputs (not tracked in git — reproducible)
 HANDOFF.md               Full mapping of every reported number to its source file

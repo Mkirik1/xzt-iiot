@@ -16,6 +16,7 @@ import validation_agent as _engine  # noqa: E402  (self_hardening/validation_age
 class ValidationAgent(BaseAgent):
     agent_id = "validation_agent"
     name = "Validation Agent"
+    agent_kind = "service"   # computes ASR/NWFSR; an evaluator
 
     def run(self, engine: PolicyEngine, attack_reqs: list, normal_reqs: list) -> AgentResult:
         self.status = "running"

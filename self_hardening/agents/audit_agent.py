@@ -26,6 +26,7 @@ HashChain = _mod.HashChain
 class AuditAgent(BaseAgent):
     agent_id = "audit_agent"
     name = "Audit Agent"
+    agent_kind = "service"   # append-only hash-chained log
 
     def __init__(self):
         super().__init__()

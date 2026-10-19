@@ -21,6 +21,7 @@ from trust_engine import TrustEngine  # noqa: E402
 class ExplainabilityAgent(BaseAgent):
     agent_id = "explainability_agent"
     name = "Explainability Agent"
+    agent_kind = "service"   # formats per-decision explanations
 
     def __init__(self, trust_engine: TrustEngine):
         super().__init__()

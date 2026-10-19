@@ -141,6 +141,7 @@ def evolve_worst_case(policy_engine: PolicyEngine, seed: int = 1,
 class EvolutionaryRedAgent(BaseAgent):
     agent_id = "evolutionary_red_agent"
     name = "Evolutionary Red Agent"
+    agent_kind = "goal_based_agent"   # queries the CURRENT policy and searches for the scenario parameters that maximise evasion
 
     def run(self, policy_engine: PolicyEngine, seed: int) -> AgentResult:
         self.status = "running"
