@@ -22,3 +22,8 @@ __pycache__/
 .DS_Store
 .vscode/
 *.log
+
+# Hardware testbed runtime state (device-specific, regenerated on the bench)
+hardware/gateway/enrolled_firmware.yaml
+hardware/gateway/audit_chain.json
+hardware/gateway/passwords.txt

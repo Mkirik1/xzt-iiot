@@ -641,6 +641,7 @@ inflating the headline numbers:
 12. Only two components are goal-based agents (2.1); the rest are a reflex agent and services. Describe the system accordingly.
 13. The ML factor is a weighted term in a linear trust score, not a veto: a device with clean ABAC attributes and confidently malicious traffic is still allowed about a third of the time (insider_flood, 2.3b).
 14. The held-out attack classes in 2.3b are already blocked at Cycle 0, so they do not test transfer; only the new low_and_slow class does.
+15. The simulated ABAC policies have no authentication precondition: identity and authentication strength are only weighted trust factors. The hardware gateway's tests showed the consequence: a request with a wrong token but otherwise clean attributes scores 0.56 and clears the pump policy's 0.55 threshold. The gateway (`hardware/gateway/gateway.py`) therefore denies unauthenticated requests before any trust calculation; the simulation is left unchanged so its reported numbers stay valid, and this is disclosed rather than fixed there.
 
 ### 2.8 Reviewer criticisms — status
 
@@ -652,7 +653,15 @@ inflating the headline numbers:
 | R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | **Addressed** (2.3b): hardened on 5 classes, evaluated on seen, held-out and 2 new classes plus 154 legitimate workflows. Hardening transfers to the new low_and_slow class (63.7% → 26.7%); an ABAC-clean insider flood still passes ~30% (the ML factor is a weight, not a veto); hardening's cost concentrates on boundary workflows (unusual tasks 90.0% → 77.2% with fixed rules) |
 | R5 | "Agent" undefined; components look like scripted modules | **Addressed** — standard definition (Russell & Norvig), every component labelled with its kind in code and in 2.1: two goal-based agents, one reflex agent, five services. The defender is now genuinely goal-based: the J objective, previously unused by the loop, drives it. Real data: J-driven 11.6% → 10.6% ASR, NWFSR 97.5% → 95.5% (fixed rules: → 7.7%, → 93.5%); neither improves J on held-out evaluation scenarios |
 
-### 2.9 Hardware testbed (diploma prototype, planned)
+### 2.9 Hardware testbed (diploma prototype, in progress)
+
+Code ready, hardware not yet built: `hardware/` holds the gateway
+(`gateway/gateway.py`, using the same PolicyEngine/TrustEngine with
+measured attributes), one ESP32 sketch for the sensor, pump and
+attacker roles (compile-checked for all three on ESP32 core 2.0.9),
+two Mosquitto configs (open, and with ACLs) and a Russian bench guide.
+Gateway logic has 9 tests and was run end to end through a real MQTT
+broker with simulated devices. Planned design below.
 
 Raspberry Pi 4 as the gateway (MQTT broker + this policy engine + the
 model + audit log + dashboard), three ESP32 nodes (temperature sensor,

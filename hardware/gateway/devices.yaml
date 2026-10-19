@@ -1,0 +1,32 @@
+# devices.yaml -- the gateway's device registry (lab testbed only).
+#
+# token        shared secret the device sends with every request
+# fw_md5       firmware fingerprint(s) the device is allowed to run. Leave
+#              empty, start the gateway with --enroll, power the device up
+#              once: the gateway records the MD5 it reports in
+#              enrolled_firmware.yaml (this file is never rewritten). Then
+#              restart WITHOUT --enroll. Any other firmware -> integrity fails.
+# role         ABAC role the device acts under (must be allowed by
+#              self_hardening/config/policies.yaml for the resource)
+# zone         network zone the device belongs to
+# baseline_rate  normal messages per second; much faster = anomalous
+# work_hours   [start, end) local hours; requests outside add anomaly
+#
+# Tokens below are placeholders for an isolated lab network. Change them,
+# and never reuse them anywhere real.
+
+devices:
+  esp32_sensor:
+    token: "lab-sensor-token-change-me"
+    fw_md5: []
+    role: operator
+    zone: operations
+    baseline_rate: 0.6
+    work_hours: [8, 20]
+  esp32_actuator:
+    token: "lab-actuator-token-change-me"
+    fw_md5: []
+    role: operator
+    zone: operations
+    baseline_rate: 0.6
+    work_hours: [0, 24]

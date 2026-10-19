@@ -1,0 +1,16 @@
+# acl.txt -- topic permissions for mosquitto-acl.conf
+
+user xzt-gateway
+topic read xzt/req/#
+topic read xzt/tel/#
+topic write xzt/decision/#
+topic write xzt/cmd/#
+
+user esp32_actuator
+topic read xzt/cmd/pump
+
+# every device: publish only under its own name (%u = its username),
+# read the gateway's decisions
+pattern write xzt/req/%u
+pattern write xzt/tel/%u
+pattern read xzt/decision/#
