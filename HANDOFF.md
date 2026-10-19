@@ -205,14 +205,18 @@ exactly (printed as a sanity check; on real data it printed 0.915).
 Figure: `figures/fig11_constrained_evasion.png` (red = best known,
 gray = single run).
 
-**Results on real Edge-IIoTset (single-run numbers measured; best-known
-numbers NOT MEASURED yet, they need one rerun of the updated script):**
+**Results on real Edge-IIoTset (measured):**
 
-| Tier | Frozen features | Single run (mean ± std, 3 seeds) | Best known |
+| Tier | Frozen features | Single run (mean ± std, 3 seeds) | Best known (pooled) |
 |---|---|---|---|
-| permissive | 0 of 43 | 89.5% ± 1.5 | NOT MEASURED |
-| protocol_constrained | 8 of 43 | 78.2% ± 2.1 | NOT MEASURED |
-| strict | 14 of 43 | 83.0% ± 1.5 | NOT MEASURED |
+| permissive | 0 of 43 | 89.5% ± 1.5 | 100% (200/200) |
+| protocol_constrained | 8 of 43 | 78.2% ± 2.1 | 100% (200/200) |
+| strict | 14 of 43 | 83.0% ± 1.5 | 100% (200/200) |
+
+Per-seed strict runs evaded 165, 170 and 163 of the 200 blocked
+attacks; their union covers all 200. That is consistent with each run
+missing a different ~17%: if misses were independent, the chance a
+given attack is missed by all three is about 0.5%.
 
 Frozen in protocol_constrained on the real data: `arp.hw.size`,
 `icmp.checksum`, `tcp.ack`, `tcp.ack_raw`, `tcp.checksum`, `tcp.seq`,
@@ -220,12 +224,21 @@ Frozen in protocol_constrained on the real data: `arp.hw.size`,
 dataset's features). Strict adds `tcp.flags`, `tcp.flags.ack`,
 `tcp.connection.{syn,synack,fin,rst}`.
 
-**What this answers for the reviewer:** restricting the attacker to
-fields a real sender controls lowers single-run evasion only from
-89.5% to roughly 78–83%. The model's vulnerability is therefore not an
-artifact of the permissive threat model; most of it survives realistic
-protocol constraints. Write it that way, and keep the 91.5% / 28.0%
-adversarial-training result as the permissive-tier number it is.
+**What this answers for the reviewer:** freezing every field a real
+sender cannot set (14 of 43 in the strict tier) does not protect the
+model. With three search restarts, an attacker who changes only fields
+they control evaded all 200 blocked attacks. The vulnerability is not
+an artifact of the permissive threat model.
+
+**What it does not show:** because the best-known bound saturates at
+100%, it cannot rank the tiers. The single-run differences (89.5 /
+78.2 / 83.0) mostly reflect search efficiency, as explained above; do
+not present them as "constraints reduce evasion by 11 points".
+
+**Open follow-up:** the adversarial-training defense (91.5% → 28.0%)
+was measured only against the permissive single-run attack. Whether it
+holds against a strict-tier attacker with restarts is NOT MEASURED.
+Until it is, describe the 28.0% as "against the permissive attack".
 
 Still not modelled, even in the strict tier: whether the perturbed
 traffic still achieves the attack's purpose, and consistency between
@@ -455,7 +468,7 @@ inflating the headline numbers:
 |---|---|---|
 | R1 | Track 1 and Track 2 not integrated; policy loop ignores the trained model | **Fixed in v4** — ML bridge + Experiment F (34.4% → 9.4% ASR, controlled) |
 | R2 | Single-node hash chain overclaimed as blockchain | Limitation 10 stated; wording in paper must follow it. Open option: periodic anchoring of the chain head to an external timestamping service |
-| R3 | Feature-space evasion may perturb fields an attacker cannot control | **Addressed** — `src/adversarial_evasion_constrained.py`, three threat-model tiers. Real data: single-run evasion 89.5% (permissive) vs 78.2% / 83.0% (protocol-constrained / strict), so most of the vulnerability survives realistic constraints. Best-known lower bounds still to be measured with the updated script |
+| R3 | Feature-space evasion may perturb fields an attacker cannot control | **Addressed** — `src/adversarial_evasion_constrained.py`. Even with 14 of 43 protocol/capture fields frozen, 3 search restarts evaded all 200 blocked attacks on real data: the vulnerability survives realistic constraints. Follow-up: test the adversarial-training defense against the strict attacker (NOT MEASURED) |
 | R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | Open. Planned: hold out some attack classes from Red Agent generation and test hardened policies against them; add borderline legitimate workflows |
 | R5 | "Agent" undefined; components look like scripted modules | Open. Planned: an explicit definition (perceive → decide → act with state and a goal) and honest relabelling of components that do not meet it |
 
