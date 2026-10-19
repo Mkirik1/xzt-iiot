@@ -48,6 +48,19 @@ FEATURES_PER_STEP = 6
 RESULTS_PATH = "./results/adversarial_evasion.json"
 
 
+def held_out_attack_sample(df, feature_cols, n=N_SAMPLES, seed=42):
+    """The n attack samples every evasion experiment uses: drawn ONLY from
+    the held-out test split, reproduced with exactly the split
+    train_trust_model.py uses (test_size=0.25, random_state=42,
+    stratified). Earlier versions sampled from the whole dataset, so the
+    "original model" evasion rate included training rows and was not on
+    the same samples as the defended-model evaluation."""
+    from sklearn.model_selection import train_test_split
+    _, _, _, y_test = train_test_split(df[feature_cols], df["label_binary"], test_size=0.25,
+                                       random_state=42, stratify=df["label_binary"])
+    return df.loc[y_test[y_test == 1].index].sample(n=n, random_state=seed)
+
+
 def load_model():
     bundle = joblib.load(MODEL_PATH)
     return bundle["model"], bundle["feature_cols"]
@@ -108,7 +121,7 @@ def main():
     print("Loading model and real Edge-IIoTset attack samples...")
     model, feature_cols = load_model()
     df, _, _ = load_and_encode(DATA_PATH)
-    attack_df = df[df.label_binary == 1].sample(n=N_SAMPLES, random_state=42)
+    attack_df = held_out_attack_sample(df, feature_cols)
     bounds = compute_feature_bounds(df, feature_cols)
 
     results = []
@@ -154,6 +167,7 @@ def main():
         "avg_search_iterations": round(float(np.mean([r["search_iterations_used"] for r in results])), 1),
         "wall_time_s": round(elapsed, 1),
         "threat_model": "feature-space, black-box query access, bounded to observed real-data ranges",
+        "samples": f"{N_SAMPLES} attacks from the held-out test split (random_state=42)",
         "success_criterion": f"adversarial trust_score >= TAU_ALLOW ({TAU_ALLOW}), i.e. would get real ALLOW decision",
     }
 

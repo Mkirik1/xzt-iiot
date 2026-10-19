@@ -98,3 +98,19 @@ def test_best_known_is_monotone_even_when_single_runs_are_not():
     assert rates == [0.7, 0.6, 0.4]
     assert rates == sorted(rates, reverse=True)
     assert tm["strict"]["best_known_pooled_from_tiers"] == ["strict"]
+
+
+def test_evaluation_attacks_come_only_from_held_out_split(setup):
+    """Every evasion experiment must attack the same held-out samples;
+    an earlier version sampled from the whole dataset, training rows
+    included, so before/after defense numbers used different attacks."""
+    from sklearn.model_selection import train_test_split
+    from adversarial_evasion import held_out_attack_sample
+    model, feature_cols, df, bounds = setup
+    a = held_out_attack_sample(df, feature_cols)
+    b = held_out_attack_sample(df, feature_cols)
+    assert list(a.index) == list(b.index)
+    assert (a["label_binary"] == 1).all()
+    _, X_test = train_test_split(df[feature_cols], test_size=0.25, random_state=42,
+                                 stratify=df["label_binary"])
+    assert set(a.index) <= set(X_test.index)

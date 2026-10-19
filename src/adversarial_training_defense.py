@@ -4,18 +4,27 @@ adversarial_training_defense.py
 Tests the most standard defense against feature-space evasion:
 adversarial training. Generates evasive examples against the TRAINING
 set (not the held-out test set, to avoid leakage), adds them to the
-training data as additional "attack" examples, retrains, then
-re-runs the IDENTICAL evasion search against the hardened model on
-the SAME held-out test attacks used in adversarial_evasion.py --
-giving a fair, leakage-free before/after comparison.
+training data as additional "attack" examples, and retrains.
 
-Also re-checks clean-data F1 on the untouched test set, to confirm
-the defense doesn't wreck normal performance.
+EVALUATION (rewritten after review). Both the original and the defended
+model are attacked on the SAME 200 attacks from the held-out test split
+(adversarial_evasion.held_out_attack_sample), with the SAME search
+seeds, under two threat models from adversarial_evasion_constrained.py:
+  permissive  every feature may change
+  strict      protocol/capture fields and TCP control flags frozen
+Nothing is copied in from another script. An earlier version hard-coded
+the original model's rate (0.915) from adversarial_evasion.py, which had
+been measured on a different sample that included training rows, so its
+"before vs after" compared two different attack sets.
+
+Reported per model and tier: single-run evasion (mean +/- std over
+seeds) and the best-known rate (pooled over every search valid for the
+tier; see adversarial_evasion_constrained.py). Clean-data metrics on the
+untouched test set are reported for both models.
 """
 
 import json
 import sys
-import time
 
 import numpy as np
 import pandas as pd
@@ -25,12 +34,41 @@ from xgboost import XGBClassifier
 
 sys.path.insert(0, ".")
 from train_trust_model import load_and_encode, DATA_PATH  # noqa: E402
-from policy_engine import decide, TAU_ALLOW  # noqa: E402
-from adversarial_evasion import (compute_feature_bounds, predict_p_malicious,  # noqa: E402
-                                  evasion_search, N_SAMPLES, RNG)
+from adversarial_evasion import (compute_feature_bounds, evasion_search,  # noqa: E402
+                                  held_out_attack_sample)
+from adversarial_evasion_constrained import (SEARCH_SEEDS, TIERS, add_best_known,  # noqa: E402
+                                              run_tier, split_features)
 
 RESULTS_PATH = "./results/adversarial_training_defense.json"
 N_ADV_TRAIN_SAMPLES = 300
+EVAL_TIERS = ["permissive", "strict"]
+
+
+def train_xgb(X, y):
+    clf = XGBClassifier(n_estimators=200, max_depth=8, learning_rate=0.1,
+                        eval_metric="logloss", random_state=42, n_jobs=-1)
+    clf.fit(X, y)
+    return clf
+
+
+def evaluate_evasion(model, feature_cols, bounds, attack_rows, label):
+    """Attack one model under each evaluation tier with every search seed."""
+    tiers = {}
+    for tier in EVAL_TIERS:
+        mutable, frozen = split_features(feature_cols, TIERS[tier])
+        runs = []
+        for seed in SEARCH_SEEDS:
+            r = run_tier(model, feature_cols, bounds, attack_rows, mutable, seed)
+            r["seed"] = seed
+            runs.append(r)
+            print(f"  [{label} / {tier}] seed {seed}: "
+                  f"{r['n_successfully_evaded_to_allow']}/{r['n_originally_blocked']}")
+        rates = np.array([r["evasion_success_rate_of_blocked"] for r in runs], dtype=float)
+        tiers[tier] = {"evasion_rate_mean": round(float(rates.mean()), 4),
+                       "evasion_rate_std": round(float(rates.std()), 4),
+                       "per_seed": runs, "frozen_features": frozen}
+    add_best_known(tiers)
+    return tiers
 
 
 def main():
@@ -42,10 +80,7 @@ def main():
         X, y, df.index, test_size=0.25, random_state=42, stratify=y)
 
     print("Training the ORIGINAL (undefended) model...")
-    clf_orig = XGBClassifier(n_estimators=200, max_depth=8, learning_rate=0.1,
-                              eval_metric="logloss", random_state=42, n_jobs=-1)
-    clf_orig.fit(X_train, y_train)
-
+    clf_orig = train_xgb(X_train, y_train)
     bounds = compute_feature_bounds(df, feature_cols)
 
     print(f"Generating {N_ADV_TRAIN_SAMPLES} adversarial examples from the TRAINING "
@@ -53,25 +88,19 @@ def main():
     train_attack_idx = idx_train[y_train == 1]
     adv_sample_idx = np.random.RandomState(1).choice(
         train_attack_idx, size=min(N_ADV_TRAIN_SAMPLES, len(train_attack_idx)), replace=False)
-
     adv_rows = []
     rng = np.random.default_rng(7)
     for i in adv_sample_idx:
         orig_row = df.loc[i, feature_cols].to_dict()
-        adv_row, adv_p, _ = evasion_search(clf_orig, feature_cols, bounds, orig_row, rng, max_iters=60)
+        adv_row, _, _ = evasion_search(clf_orig, feature_cols, bounds, orig_row, rng, max_iters=60)
         adv_rows.append(adv_row)
     adv_df = pd.DataFrame(adv_rows)[feature_cols]
-    adv_labels = pd.Series([1] * len(adv_df))  # still genuinely malicious traffic, just disguised
+    adv_labels = pd.Series([1] * len(adv_df))  # still malicious traffic, just disguised
 
     print("Augmenting training set with adversarial examples and retraining...")
-    X_train_aug = pd.concat([X_train, adv_df], ignore_index=True)
-    y_train_aug = pd.concat([y_train.reset_index(drop=True), adv_labels], ignore_index=True)
+    clf_defended = train_xgb(pd.concat([X_train, adv_df], ignore_index=True),
+                             pd.concat([y_train.reset_index(drop=True), adv_labels], ignore_index=True))
 
-    clf_defended = XGBClassifier(n_estimators=200, max_depth=8, learning_rate=0.1,
-                                  eval_metric="logloss", random_state=42, n_jobs=-1)
-    clf_defended.fit(X_train_aug, y_train_aug)
-
-    # ---- Re-check clean-data performance (didn't we break normal accuracy?) ----
     def clean_metrics(clf):
         y_pred = clf.predict(X_test)
         y_proba = clf.predict_proba(X_test)[:, 1]
@@ -87,35 +116,38 @@ def main():
     print("  Original: ", metrics_orig)
     print("  Defended: ", metrics_defended)
 
-    # ---- Re-run the IDENTICAL evasion search against the hardened model ----
-    print(f"\nRe-running evasion search against the DEFENDED model "
-          f"on the same {N_SAMPLES} held-out test attacks...")
-    test_attack_df = df.loc[idx_test][df.loc[idx_test, "label_binary"] == 1].sample(
-        n=N_SAMPLES, random_state=42)
+    attack_df = held_out_attack_sample(df, feature_cols)
+    assert set(attack_df.index) <= set(idx_test), "evaluation attacks must come from the test split"
+    attack_rows = [row[feature_cols].to_dict() for _, row in attack_df.iterrows()]
 
-    n_evaded_defended = 0
-    rng2 = np.random.default_rng(42)
-    for idx, row in test_attack_df.iterrows():
-        orig = row[feature_cols].to_dict()
-        orig_p = predict_p_malicious(clf_defended, feature_cols, orig)
-        orig_decision = decide(1 - orig_p)
-        adv, adv_p, _ = evasion_search(clf_defended, feature_cols, bounds, orig, rng2)
-        adv_decision = decide(1 - adv_p)
-        if adv_decision == "ALLOW" and orig_decision != "ALLOW":
-            n_evaded_defended += 1
+    print(f"\nAttacking both models on the same {len(attack_rows)} held-out attacks...")
+    evasion = {"original": evaluate_evasion(clf_orig, feature_cols, bounds, attack_rows, "original"),
+               "defended": evaluate_evasion(clf_defended, feature_cols, bounds, attack_rows, "defended")}
 
-    evasion_rate_defended = n_evaded_defended / N_SAMPLES
-
+    p_orig = evasion["original"]["permissive"]["evasion_rate_mean"]
+    p_def = evasion["defended"]["permissive"]["evasion_rate_mean"]
     summary = {
+        "samples": f"{len(attack_rows)} attacks from the held-out test split, identical for both models",
+        "search_seeds": SEARCH_SEEDS,
         "n_adversarial_training_examples_added": len(adv_df),
+        "adversarial_examples_generated_under": "permissive",
         "clean_metrics_original_model": metrics_orig,
         "clean_metrics_defended_model": metrics_defended,
-        "evasion_success_rate_original_model": 0.915,  # from adversarial_evasion.py
-        "evasion_success_rate_defended_model": round(evasion_rate_defended, 4),
-        "relative_evasion_reduction_pct": round((0.915 - evasion_rate_defended) / 0.915 * 100, 1),
+        "evasion": evasion,
+        # Headline pair kept under the old key names for make_defense_figure.py
+        # and older readers: permissive tier, single-run mean, same samples.
+        "evasion_success_rate_original_model": p_orig,
+        "evasion_success_rate_defended_model": p_def,
+        "relative_evasion_reduction_pct": round((p_orig - p_def) / p_orig * 100, 1) if p_orig else None,
     }
+
     print("\n" + "=" * 60)
-    print(json.dumps(summary, indent=2))
+    for model in ("original", "defended"):
+        for tier in EVAL_TIERS:
+            t = evasion[model][tier]
+            print(f"{model:9s} {tier:11s} single run = {t['evasion_rate_mean']:.3f} ± "
+                  f"{t['evasion_rate_std']:.3f} | best known = {t['evasion_rate_best_known']:.3f}")
+    print(f"Permissive single-run reduction: {summary['relative_evasion_reduction_pct']}% relative")
 
     with open(RESULTS_PATH, "w") as f:
         json.dump(summary, f, indent=2)

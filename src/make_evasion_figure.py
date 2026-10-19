@@ -31,7 +31,7 @@ ax = axes[1]
 feats = [f[0] for f in top_feats][::-1]
 counts = [f[1] for f in top_feats][::-1]
 ax.barh(feats, counts, color="#7c3aed")
-ax.set_xlabel("Appearances among successful evasions (n=183)")
+ax.set_xlabel(f"Appearances among successful evasions (n={summary['n_successfully_evaded_to_allow']})")
 ax.set_title("Which features the attack exploits\n(same features SHAP ranks as most important)")
 
 fig.tight_layout()

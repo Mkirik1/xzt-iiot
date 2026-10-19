@@ -107,138 +107,135 @@ touched in this session):
 **This should be a prominent subsection, possibly the headline result
 of the Discussion.** It answers a question the base F1/accuracy
 numbers cannot: does high offline accuracy mean the model resists a
-motivated attacker? Answer: no, and we measured exactly how much, then
-fixed most of it.
+motivated attacker? Answer: no. We measure how much, under three threat
+models, and test the standard defense against the same attacks.
+
+### Evaluation sample (fixed in v4 — all Track 1.5 numbers must be re-measured)
+
+**Bug found during the R3 work:** `adversarial_evasion.py` drew its 200
+attack samples from the WHOLE dataset (training rows included), while
+`adversarial_training_defense.py` attacked 200 samples from the
+held-out test split and then hard-coded the original model's rate
+(0.915) from the first script. The published "91.5% → 28.0%" therefore
+compared two different attack sets, and the 91.5% was not held-out.
+`fig11` and the R3 text also called the first set "held-out", which was
+wrong.
+
+Fix: one shared sampler, `held_out_attack_sample()`, gives every
+experiment the same 200 attacks from the held-out test split (unit-
+tested). The defense script now attacks both models itself, on those
+samples, with the same seeds, under the permissive and strict tiers.
+Nothing is copied between scripts.
+
+**Every number in this Track 1.5 section that predates this fix is
+superseded.** Old values are kept below only so the change is
+traceable; do not cite them.
 
 ### Attack: black-box feature-space evasion
 
 `src/adversarial_evasion.py` — a query-only (no model-internals
 access) hill-climbing search that perturbs a real attack sample's
 features, bounded to the range of values actually observed in real
-Edge-IIoTset traffic (an attacker cannot set a feature outside what
-real traffic ever showed). Success criterion is the REAL deployed
-decision threshold (`TAU_ALLOW=0.80` in `policy_engine.py`), not just
-flipping the raw 0.5 classifier boundary.
+Edge-IIoTset traffic. Success criterion is the REAL deployed decision
+threshold (`TAU_ALLOW=0.80` in `policy_engine.py`), not the raw 0.5
+classifier boundary.
 
-**Result: 91.5% of blocked attack samples (183/200) could be perturbed
-into getting a real ALLOW decision.** State the threat model
-explicitly and honestly in the paper: this is a permissive,
-feature-space threat model (standard in adversarial ML research) that
-assumes the attacker can freely set ANY feature within its observed
-range — including some protocol-state fields (tcp.seq, tcp.ack) a real
-attacker has less than full control over. Report it as "the measured
-evasion rate under this permissive threat model", not as an upper bound
-(we have not proven no stronger attack exists) and not as a claim that
-this exact attack is practical against a deployed system as-is. A
-reviewer specifically flagged this; see open item R3 below.
+| | Value |
+|---|---|
+| Evasion, permissive, seed 42, held-out sample | **NOT MEASURED** (rerun pending) |
+| Superseded (mixed train/test sample) | 91.5% (183/200) |
 
-**Striking, citable detail:** the features the attack exploits most
-(tcp.ack_raw, tcp.ack, tcp.checksum, mqtt.hdrflags, tcp.seq) are almost
-exactly the same features SHAP ranks as most important globally (see
-Track 1's fig2) — the features that give the model its explanatory
-power are also its biggest attack surface. This is a genuinely
-interesting, defensible observation, not just a coincidence to gloss
-over.
+State the threat model explicitly: permissive feature space, the
+attacker may set ANY feature within its observed range, including
+protocol-state fields such as `tcp.seq` / `tcp.ack`. Report it as the
+rate measured under this threat model, not as an upper bound and not
+as a practical attack. The constrained tiers below address this.
 
-Figure: `figures/fig8_adversarial_evasion.png` (success rate bar +
-most-exploited-features bar, side by side).
+**Citable detail (check it still holds after the rerun):** in the
+superseded run the most-exploited features (`tcp.ack_raw`, `tcp.ack`,
+`tcp.checksum`, `mqtt.hdrflags`, `tcp.seq`) were almost exactly the
+ones SHAP ranks most important globally (fig2): the features that give
+the model its explanatory power are also its main attack surface.
 
-### Defense: adversarial training
-
-`src/adversarial_training_defense.py` — generated 300 evasive examples
-against the TRAINING set only (test set held out, zero leakage),
-added them to training data as additional "attack" examples, retrained
-XGBoost, then re-ran the IDENTICAL evasion search against the hardened
-model on the SAME 200 held-out test attacks.
-
-| | Original model | + Adversarial training |
-|---|---|---|
-| Evasion success rate | 91.5% | **28.0%** |
-| Clean-data F1 | 0.9855 | 0.9856 |
-| Clean-data accuracy | 0.9751 | 0.9754 |
-
-**69.4% relative reduction in evasion success, with no decrease in
-clean-data performance observed in this experiment** (F1 0.9855 →
-0.9856, accuracy 0.9751 → 0.9754). Do not phrase this as "zero cost":
-it is one split and one run. Honestly disclose the residual: 28% still evade
-even after defense — adversarial training reduces but does not
-eliminate the vulnerability; frame this as a genuine open problem,
-not a solved one.
-
-Figure: `figures/fig9_adversarial_defense.png` (before/after evasion
-rate + side-by-side clean metrics showing no trade-off).
-
-**Suggested framing for the paper:** this whole Track 1.5 result is
-arguably the paper's strongest contribution to lead the Discussion
-section with — it demonstrates genuine security-research depth (attack
-+ defense + honest residual risk), not just a classification benchmark.
-Consider referencing it from the Abstract/Introduction as well.
+Figure: `figures/fig8_adversarial_evasion.png`.
 
 ### Protocol-constrained evasion (response to reviewer R3)
 
 `src/adversarial_evasion_constrained.py` re-runs the identical search
-on the identical 200 held-out attacks with the identical budget, under
-three threat models:
+on the same 200 held-out attacks with the identical budget, under three
+threat models:
 
 | Tier | What the attacker may change | Frozen fields (each has a written reason in the code) |
 |---|---|---|
-| permissive | every feature | none (the original 91.5% result) |
+| permissive | every feature | none |
 | protocol_constrained | everything the sender actually chooses | checksums (`tcp.checksum`, `icmp.checksum`), TCP sequence state (`tcp.seq`, `tcp.ack`, `tcp.ack_raw`), Wireshark-assigned indices (`udp.stream`, `tcp.stream`, `dns.retransmit_request_in`), `arp.hw.size` |
 | strict | as above, minus TCP control flags | + `tcp.flags`, `tcp.flags.ack`, `tcp.connection.{syn,synack,fin,rst}` |
+
+On the real data, 8 of 43 features are frozen in protocol_constrained
+(`tcp.stream` is not a dataset feature) and 14 of 43 in strict.
 
 Each tier is searched with 3 seeds (42, 43, 44). Two numbers per tier:
 
 - **Single search run, mean ± std.** Shows search variance. It mixes
   the threat model with search efficiency: with fewer mutable features
   each random step concentrates on the rest, so a fixed-budget search
-  can score a stricter tier higher. On the real data it did (table
-  below), which no optimal attacker could do.
+  can score a stricter tier higher (it did in the superseded run).
 - **Best known (headline).** Fraction of blocked attacks evaded by any
-  search whose threat model is at least as strict as this tier (all
-  seeds of this tier and of every stricter tier). An evasion found
-  under stricter constraints is automatically legal under looser ones,
-  so this is a valid lower bound on the attacker in that tier, and it
-  is monotone by construction (unit-tested).
+  search whose threat model is at least as strict as this tier. An
+  evasion found under stricter constraints is legal under looser ones,
+  so this is a valid lower bound on the attacker in that tier and is
+  monotone by construction (unit-tested).
 
 Seed 42 of the permissive tier reproduces `adversarial_evasion.py`
-exactly (printed as a sanity check; on real data it printed 0.915).
-Figure: `figures/fig11_constrained_evasion.png` (red = best known,
-gray = single run).
+exactly (printed as a sanity check). Figure:
+`figures/fig11_constrained_evasion.png` (red = best known, gray =
+single run).
 
-**Results on real Edge-IIoTset (measured):**
-
-| Tier | Frozen features | Single run (mean ± std, 3 seeds) | Best known (pooled) |
+| Tier | Single run (mean ± std) | Best known | Superseded run (mixed sample): single / best |
 |---|---|---|---|
-| permissive | 0 of 43 | 89.5% ± 1.5 | 100% (200/200) |
-| protocol_constrained | 8 of 43 | 78.2% ± 2.1 | 100% (200/200) |
-| strict | 14 of 43 | 83.0% ± 1.5 | 100% (200/200) |
+| permissive | NOT MEASURED | NOT MEASURED | 89.5% ± 1.5 / 100% |
+| protocol_constrained | NOT MEASURED | NOT MEASURED | 78.2% ± 2.1 / 100% |
+| strict | NOT MEASURED | NOT MEASURED | 83.0% ± 1.5 / 100% |
 
-Per-seed strict runs evaded 165, 170 and 163 of the 200 blocked
-attacks; their union covers all 200. That is consistent with each run
-missing a different ~17%: if misses were independent, the chance a
-given attack is missed by all three is about 0.5%.
+The superseded run already showed the qualitative answer to the
+reviewer: with three restarts, a strict-tier attacker evaded every
+blocked attack, so the vulnerability is not an artifact of the
+permissive threat model. Confirm it on the held-out sample before
+writing it. If the best-known bound saturates at 100% again, it cannot
+rank the tiers; say so, and do not present single-run differences as
+a constraint effect.
 
-Frozen in protocol_constrained on the real data: `arp.hw.size`,
-`icmp.checksum`, `tcp.ack`, `tcp.ack_raw`, `tcp.checksum`, `tcp.seq`,
-`udp.stream`, `dns.retransmit_request_in` (`tcp.stream` is not among the
-dataset's features). Strict adds `tcp.flags`, `tcp.flags.ack`,
-`tcp.connection.{syn,synack,fin,rst}`.
+### Defense: adversarial training
 
-**What this answers for the reviewer:** freezing every field a real
-sender cannot set (14 of 43 in the strict tier) does not protect the
-model. With three search restarts, an attacker who changes only fields
-they control evaded all 200 blocked attacks. The vulnerability is not
-an artifact of the permissive threat model.
+`src/adversarial_training_defense.py` — generates 300 evasive examples
+against the TRAINING set only (permissive attacker), adds them as
+additional "attack" examples, retrains XGBoost, then attacks BOTH the
+original and the defended model on the same 200 held-out attacks, with
+the same seeds, under the permissive and strict tiers. Clean-data
+metrics on the untouched test split for both models.
 
-**What it does not show:** because the best-known bound saturates at
-100%, it cannot rank the tiers. The single-run differences (89.5 /
-78.2 / 83.0) mostly reflect search efficiency, as explained above; do
-not present them as "constraints reduce evasion by 11 points".
+| | Original model | + Adversarial training |
+|---|---|---|
+| Evasion, permissive (single run / best known) | NOT MEASURED | NOT MEASURED |
+| Evasion, strict (single run / best known) | NOT MEASURED | NOT MEASURED |
+| Clean-data F1 / accuracy | 0.9855 / 0.9751 (superseded run) | 0.9856 / 0.9754 (superseded run) |
+| Superseded headline (different samples, see above) | 91.5% | 28.0% |
 
-**Open follow-up:** the adversarial-training defense (91.5% → 28.0%)
-was measured only against the permissive single-run attack. Whether it
-holds against a strict-tier attacker with restarts is NOT MEASURED.
-Until it is, describe the 28.0% as "against the permissive attack".
+The clean-data metrics did not depend on the sampling bug, so they
+should reproduce; the evasion rows must be re-measured. When writing:
+- The defense was trained on permissive-attacker examples only. If it
+  helps much less against the strict attacker, report that plainly; it
+  is a real finding about adversarial training, not a failure to hide.
+- No clean-data decrease observed is "in this experiment", not "zero
+  cost". Whatever residual evasion remains after defense is an open
+  problem, not a solved one.
+
+Figure: `figures/fig9_adversarial_defense.png` (left: evasion by tier,
+original vs defended; right: clean-data metrics).
+
+**Framing:** Track 1.5 is still a strong Discussion section (attack +
+realistic constraints + defense + honest residual risk), but its
+numbers come from the rerun, not from the superseded values.
 
 Still not modelled, even in the strict tier: whether the perturbed
 traffic still achieves the attack's purpose, and consistency between
@@ -468,7 +465,7 @@ inflating the headline numbers:
 |---|---|---|
 | R1 | Track 1 and Track 2 not integrated; policy loop ignores the trained model | **Fixed in v4** — ML bridge + Experiment F (34.4% → 9.4% ASR, controlled) |
 | R2 | Single-node hash chain overclaimed as blockchain | Limitation 10 stated; wording in paper must follow it. Open option: periodic anchoring of the chain head to an external timestamping service |
-| R3 | Feature-space evasion may perturb fields an attacker cannot control | **Addressed** — `src/adversarial_evasion_constrained.py`. Even with 14 of 43 protocol/capture fields frozen, 3 search restarts evaded all 200 blocked attacks on real data: the vulnerability survives realistic constraints. Follow-up: test the adversarial-training defense against the strict attacker (NOT MEASURED) |
+| R3 | Feature-space evasion may perturb fields an attacker cannot control | **Implemented** — three threat-model tiers (`src/adversarial_evasion_constrained.py`) and the defense evaluated under permissive and strict. A first real-data run showed a strict attacker with 3 restarts evading all 200 blocked attacks, but it used a mixed train/test sample (bug fixed in v4); held-out numbers NOT MEASURED until rerun |
 | R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | Open. Planned: hold out some attack classes from Red Agent generation and test hardened policies against them; add borderline legitimate workflows |
 | R5 | "Agent" undefined; components look like scripted modules | Open. Planned: an explicit definition (perceive → decide → act with state and a goal) and honest relabelling of components that do not meet it |
 

@@ -51,7 +51,7 @@ import pandas as pd
 
 sys.path.insert(0, ".")
 from adversarial_evasion import (compute_feature_bounds, evasion_search,  # noqa: E402
-                                  load_model, predict_p_malicious, N_SAMPLES)
+                                  held_out_attack_sample, load_model, predict_p_malicious)
 from policy_engine import decide, TAU_ALLOW  # noqa: E402
 from train_trust_model import load_and_encode, DATA_PATH  # noqa: E402
 
@@ -153,7 +153,7 @@ def main():
     print("Loading model and real Edge-IIoTset attack samples...")
     model, feature_cols = load_model()
     df, _, _ = load_and_encode(DATA_PATH)
-    attack_df = df[df.label_binary == 1].sample(n=N_SAMPLES, random_state=42)
+    attack_df = held_out_attack_sample(df, feature_cols)
     bounds = compute_feature_bounds(df, feature_cols)
     attack_rows = [row[feature_cols].to_dict() for _, row in attack_df.iterrows()]
 
