@@ -33,6 +33,7 @@ _spec.loader.exec_module(_audit_chain_mod)
 HashChain = _audit_chain_mod.HashChain
 
 from blue_agent import propose_and_apply  # noqa: E402
+from ml_trust_bridge import get_bridge  # noqa: E402
 from normal_scenarios import generate_normal_scenarios  # noqa: E402
 from policy_engine import PolicyEngine  # noqa: E402
 from red_agent import generate_attack_scenarios  # noqa: E402
@@ -61,13 +62,22 @@ def policy_snapshot_hash(engine: PolicyEngine) -> str:
 
 
 def run(seed: int = 42, n_per_attack_type: int = N_PER_ATTACK_TYPE, n_normal: int = N_NORMAL,
-        write_audit: bool = True, verbose: bool = True):
+        write_audit: bool = True, verbose: bool = True, use_ml_integration: bool = True):
     """Run one full 5-cycle hardening experiment with a fresh policy/trust
     state and a scenario set drawn from `seed`. Returns cycle_results.
     Called repeatedly with different seeds by run_multiseed.py to test
     whether the ASR-reduction trend is a robust effect or a single-draw
-    artifact."""
-    trust_engine = TrustEngine(TrustWeights.from_yaml(str(CONFIG / "trust_weights.yaml")))
+    artifact.
+
+    use_ml_integration=True (default) scores every request's trust
+    partly from the ACTUAL trained Track-1 model (see
+    ml_trust_bridge.py) -- this is the Track1/Track2 integration fix.
+    Set False to reproduce the old ABAC-only baseline (used by
+    ablation_experiment.py's Experiment F to measure what the
+    integration actually changes)."""
+    ml_bridge = get_bridge() if use_ml_integration else None
+    trust_engine = TrustEngine(TrustWeights.from_yaml(str(CONFIG / "trust_weights.yaml")),
+                                ml_bridge=ml_bridge)
     policy_engine = PolicyEngine(str(CONFIG / "policies.yaml"), trust_engine)
 
     attack_reqs = generate_attack_scenarios(n_per_type=n_per_attack_type, seed=seed)

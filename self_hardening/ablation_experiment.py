@@ -17,6 +17,17 @@ contributes, rather than just reporting the full system's numbers.
                                         real per-decision audit-write latency
   Experiment E: Full XZT-IIoT       -- B + C + D + the 5-cycle adaptive
                                         self-hardening loop (final-cycle ASR)
+  Experiment F: ZT ABAC + ML model  -- same as B (Cycle-0 policy, no
+                                        adaptive hardening), but TrustEngine
+                                        is wired to the ACTUAL trained
+                                        Track-1 XGBoost model (ml_trust_bridge.py)
+                                        instead of running ABAC-only. Added in
+                                        direct response to the paper rejection's
+                                        core, convergent criticism: Track 1 and
+                                        Track 2 were previously never connected.
+                                        Holding every other variable fixed vs. B
+                                        isolates exactly what the integration
+                                        itself buys, as a single measured number.
 
 HONEST FRAMING (put this in the paper too): C and D do not change WHICH
 decisions get made relative to B -- explainability and audit logging are
@@ -39,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from agents.coordinator_agent import _policy_snapshot_hash  # noqa: E402
 from agents.explainability_agent import ExplainabilityAgent  # noqa: E402
 from attributes import AccessRequest  # noqa: E402
+from ml_trust_bridge import get_bridge  # noqa: E402
 from normal_scenarios import generate_normal_scenarios  # noqa: E402
 from policy_engine import Decision, PolicyEngine  # noqa: E402
 from red_agent import generate_attack_scenarios  # noqa: E402
@@ -130,6 +142,28 @@ def run_experiment_d(policy_engine, attack_reqs):
             "audit_valid": chain.verify(), "audit_blocks": len(chain.chain)}
 
 
+def run_experiment_f():
+    """ZT ABAC + the ACTUAL trained Track-1 model, Cycle-0 policy, single
+    static evaluation -- the direct Track1/Track2-integration counterpart
+    to Experiment B. Same seed, same policy set, same scenario requests;
+    the ONLY difference is whether TrustEngine consults the trained model.
+    If this isn't measurably different from B, the integration isn't
+    doing anything real; if it is, that's the honest, reproducible
+    evidence the rejection reviews asked for."""
+    bridge = get_bridge()
+    if bridge is None:
+        return {"asr": "NOT MEASURED", "nwfsr": "NOT MEASURED",
+                "note": "Track-1 model not trained in this environment -- "
+                        "run `python src/train_trust_model.py` first."}
+    trust_engine = TrustEngine(TrustWeights.from_yaml(str(CONFIG / "trust_weights.yaml")),
+                                ml_bridge=bridge)
+    policy_engine = PolicyEngine(str(CONFIG / "policies.yaml"), trust_engine)
+    attack_reqs = generate_attack_scenarios(n_per_type=N_PER_TYPE, seed=SEED)
+    normal_reqs = generate_normal_scenarios(n=N_NORMAL, seed=SEED + 1000)
+    result = validate(policy_engine, attack_reqs, normal_reqs)
+    return {"asr": round(result.asr, 4), "nwfsr": round(result.nwfsr, 4)}
+
+
 def run_experiment_e():
     """Full XZT-IIoT: read the already-computed 5-cycle, 5-seed
     multi-seed result (final cycle) -- do not recompute/duplicate,
@@ -168,6 +202,14 @@ def main():
     print(f"  ASR={exp_e['asr']:.3f}±{exp_e['asr_std']:.3f}  NWFSR={exp_e['nwfsr']:.3f} "
           f"(after {exp_e['n_cycles']} cycles, {exp_e['n_seeds']} seeds)")
 
+    print("Running Experiment F (ZT ABAC + Track-1 ML model, static)...")
+    exp_f = run_experiment_f()
+    if exp_f["asr"] == "NOT MEASURED":
+        print(f"  NOT MEASURED -- {exp_f['note']}")
+    else:
+        print(f"  ASR={exp_f['asr']:.3f}  NWFSR={exp_f['nwfsr']:.3f}  "
+              f"(vs. Experiment B ASR={exp_b['asr']:.3f} with identical scenarios/policy/seed)")
+
     table = {
         "Experiment A (Baseline ABAC)": {
             "Zero_Trust": "No", "Dynamic_Trust": "No", "Explainability": "No",
@@ -196,6 +238,11 @@ def main():
             "Blockchain_Audit": "Yes", "Adaptive_AI": "Yes",
             "ASR": f"{exp_e['asr']}±{exp_e['asr_std']}", "NWFSR": exp_e["nwfsr"],
         },
+        "Experiment F (ZT ABAC + Track-1 ML model, static)": {
+            "Zero_Trust": "Yes", "Dynamic_Trust": "Yes", "Explainability": "No",
+            "Blockchain_Audit": "No", "Adaptive_AI": "No", "ML_Model_Integrated": "Yes",
+            "ASR": exp_f["asr"], "NWFSR": exp_f["nwfsr"],
+        },
     }
 
     RESULTS.mkdir(exist_ok=True)
@@ -207,10 +254,11 @@ def main():
     with open(RESULTS / "ablation_table.csv", "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["Experiment", "Zero-Trust", "Dynamic Trust", "Explainability",
-                          "Blockchain Audit", "Adaptive AI", "ASR", "NWFSR"])
+                          "Blockchain Audit", "Adaptive AI", "ML Model Integrated", "ASR", "NWFSR"])
         for name, row in table.items():
             writer.writerow([name, row["Zero_Trust"], row["Dynamic_Trust"], row["Explainability"],
-                              row["Blockchain_Audit"], row["Adaptive_AI"], row["ASR"], row["NWFSR"]])
+                              row["Blockchain_Audit"], row["Adaptive_AI"],
+                              row.get("ML_Model_Integrated", "No"), row["ASR"], row["NWFSR"]])
 
     print(f"\nSaved -> {RESULTS / 'ablation_table.json'} and ablation_table.csv")
 

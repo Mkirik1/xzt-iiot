@@ -78,9 +78,67 @@ class TestTrustEngine:
     def test_factor_breakdown_sums_close_to_score(self, trust_engine):
         req = make_request()
         breakdown = trust_engine.factor_breakdown(req)
-        # breakdown is pre-normalization; just check all expected keys present
+        # breakdown is pre-normalization; just check all expected keys present.
+        # ml_model_risk is always present (0 contribution when no ml_bridge is
+        # wired in, as in this fixture) -- see TestMLTrustIntegration below for
+        # the case where a real bridge IS wired in.
         assert set(breakdown) == {"identity_confidence", "device_integrity", "behavioral_trust",
-                                   "network_trust", "authentication_strength", "anomaly_risk"}
+                                   "network_trust", "authentication_strength", "anomaly_risk",
+                                   "ml_model_risk"}
+
+    def test_ml_risk_zero_when_no_bridge_wired(self, trust_engine):
+        """Backward-compat guarantee: a TrustEngine built without an
+        ml_bridge (as every pre-integration caller/test still does)
+        behaves exactly like the original ABAC-only formula."""
+        req = make_request()
+        breakdown = trust_engine.factor_breakdown(req)
+        assert breakdown["ml_model_risk"] == 0.0
+
+
+# ---- Track1/Track2 ML integration fix ----
+# Responds directly to the paper rejection's core, convergent reviewer
+# criticism: the self-hardening policy simulator did not consult the
+# trained Track-1 model at all. These tests prove it now does, and that
+# the model's output measurably changes decisions -- not just that the
+# code runs without crashing.
+
+class TestMLTrustIntegration:
+    def test_bridge_scores_attack_scenarios_higher_than_normal(self):
+        from ml_trust_bridge import get_bridge, SCENARIO_TO_ATTACK_TYPE
+        bridge = get_bridge()
+        if bridge is None:
+            pytest.skip("Track-1 model not trained in this environment "
+                        "(run `python src/train_trust_model.py` first)")
+        normal_scores = [bridge.score_scenario("normal", "PLC_CONTROLLER", f"norm_{i}")
+                          for i in range(10)]
+        for scenario in SCENARIO_TO_ATTACK_TYPE:
+            if scenario in ("normal", "abnormal_access_time"):
+                continue  # both map to Normal traffic by design -- see ml_trust_bridge.py
+            attack_scores = [bridge.score_scenario(scenario, "PLC_CONTROLLER", f"{scenario}_{i}")
+                              for i in range(10)]
+            assert sum(attack_scores) / len(attack_scores) > sum(normal_scores) / len(normal_scores), (
+                f"scenario '{scenario}' should score higher P(malicious) than normal traffic")
+
+    def test_ml_integration_changes_trust_scores(self):
+        """The whole point of the fix: wiring in the real model must
+        actually move the trust score for at least some requests,
+        proving Track 1's output is load-bearing, not decorative."""
+        from ml_trust_bridge import get_bridge
+        bridge = get_bridge()
+        if bridge is None:
+            pytest.skip("Track-1 model not trained in this environment")
+
+        weights_without_ml = TrustWeights.from_yaml(str(CONFIG / "trust_weights.yaml"))
+        weights_with_ml = TrustWeights.from_yaml(str(CONFIG / "trust_weights.yaml"))
+        engine_without_ml = TrustEngine(weights_without_ml, ml_bridge=None)
+        engine_with_ml = TrustEngine(weights_with_ml, ml_bridge=bridge)
+
+        attack_reqs = generate_attack_scenarios(n_per_type=5, seed=321)
+        differing = sum(
+            1 for req in attack_reqs
+            if abs(engine_with_ml.score(req) - engine_without_ml.score(req)) > 1e-9
+        )
+        assert differing > 0, "ML integration must change at least some trust scores"
 
 
 # ---- ABAC decision ----

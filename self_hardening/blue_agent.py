@@ -25,6 +25,7 @@ MAX_TRUST_THRESHOLD = 0.90
 MAX_INTEGRITY_THRESHOLD = 0.90
 MIN_ANOMALY_CEILING = 0.15
 MAX_ANOMALY_WEIGHT = 0.65
+MAX_ML_RISK_WEIGHT = 0.65
 
 
 @dataclass
@@ -73,5 +74,24 @@ def propose_and_apply(policy_engine: PolicyEngine, trust_engine: TrustEngine,
             MAX_ANOMALY_WEIGHT, trust_engine.weights.anomaly_risk + STEP)
         changes.append(f"Lowered max_anomaly_score ceiling by {STEP} and raised trust-engine "
                         f"anomaly_risk weight by {STEP} ({anomaly_related} anomaly-related bypasses).")
+
+    # BUG FOUND DURING THE TRACK1/TRACK2 INTEGRATION FIX: privilege_escalation_attempt,
+    # replay_simulation and firmware_integrity_failure (3 of Red Agent's 8 scenario
+    # classes -- added in a later revision than the original 5-scenario mitigation
+    # rules above) had NO mitigation lever at all here. A bypass from any of these
+    # three could never be reduced by a single hardening cycle, no matter how many
+    # cycles ran -- their ASR contribution was structurally stuck. Now routed through
+    # the one lever that genuinely responds to all three (each is, at its core, a
+    # traffic/behavior-level compromise signature): raise the ml_risk weight so the
+    # Track-1 model's P(malicious) output counts for more in the trust score.
+    ml_related = (counts.get("privilege_escalation_attempt", 0)
+                  + counts.get("replay_simulation", 0)
+                  + counts.get("firmware_integrity_failure", 0))
+    if ml_related > 0:
+        trust_engine.weights.ml_risk = min(
+            MAX_ML_RISK_WEIGHT, trust_engine.weights.ml_risk + STEP)
+        changes.append(f"Raised trust-engine ml_risk weight by {STEP} "
+                        f"({ml_related} bypasses from scenarios with no prior mitigation lever: "
+                        "privilege_escalation_attempt / replay_simulation / firmware_integrity_failure).")
 
     return MitigationProposal(cycle=cycle, bypassed_scenario_counts=counts, changes=changes)

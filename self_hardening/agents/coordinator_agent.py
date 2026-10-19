@@ -33,6 +33,7 @@ from agents.red_agent import RedAgent  # noqa: E402
 from agents.threat_intel_agent import ThreatIntelAgent  # noqa: E402
 from agents.validation_agent import ValidationAgent  # noqa: E402
 from evolutionary_red_agent import EvolutionaryRedAgent  # noqa: E402
+from ml_trust_bridge import get_bridge  # noqa: E402
 from normal_scenarios import generate_normal_scenarios  # noqa: E402
 from policy_engine import PolicyEngine  # noqa: E402
 from trust_engine import TrustEngine, TrustWeights  # noqa: E402
@@ -72,9 +73,16 @@ class CoordinatorAgent(BaseAgent):
                         n_per_attack_type_base: int = N_PER_ATTACK_TYPE_BASE,
                         n_normal: int = N_NORMAL, write_explanations: bool = False,
                         use_evolutionary_red: bool = False, try_live_threat_intel: bool = False,
-                        verbose: bool = True) -> AgentResult:
+                        use_ml_integration: bool = True, verbose: bool = True) -> AgentResult:
         self.status = "running"
-        trust_engine = TrustEngine(TrustWeights.from_yaml(str(CONFIG / "trust_weights.yaml")))
+        # Track1/Track2 integration fix: every trust score computed in this
+        # run now also consults the ACTUAL trained Track-1 XGBoost model via
+        # ml_trust_bridge.py, instead of running on ABAC attributes alone.
+        # use_ml_integration=False reproduces the old disconnected baseline
+        # (used by ablation_experiment.py's Experiment F).
+        ml_bridge = get_bridge() if use_ml_integration else None
+        trust_engine = TrustEngine(TrustWeights.from_yaml(str(CONFIG / "trust_weights.yaml")),
+                                    ml_bridge=ml_bridge)
         policy_engine = PolicyEngine(str(CONFIG / "policies.yaml"), trust_engine)
         policy_agent = PolicyAgent(policy_engine)
         explain_agent = ExplainabilityAgent(trust_engine)

@@ -31,6 +31,7 @@ from agents.coordinator_agent import CoordinatorAgent  # noqa: E402
 from attributes import (AccessRequest, SubjectAttributes, DeviceAttributes,  # noqa: E402
                          NetworkAttributes, ContextAttributes)
 from device_simulator import build_fleet, simulate_fleet_telemetry  # noqa: E402
+from ml_trust_bridge import get_bridge  # noqa: E402
 from policy_engine import PolicyEngine  # noqa: E402
 from trust_engine import TrustEngine, TrustWeights  # noqa: E402
 
@@ -42,7 +43,11 @@ app = FastAPI(title="XZT-IIoT API", version="1.0",
               description="Explainable Zero-Trust Access Control API for Industrial IoT")
 
 # ---- global (demo-scope) state: one shared engine + one device fleet ----
-_trust_engine = TrustEngine(TrustWeights.from_yaml(str(CONFIG / "trust_weights.yaml")))
+# get_bridge() returns None (logged, not raised) if Track 1's model hasn't
+# been trained yet in this environment -- the dashboard still runs, just
+# without the ML-integrated factor, exactly like the rest of the pipeline.
+_trust_engine = TrustEngine(TrustWeights.from_yaml(str(CONFIG / "trust_weights.yaml")),
+                             ml_bridge=get_bridge())
 _policy_engine = PolicyEngine(str(CONFIG / "policies.yaml"), _trust_engine)
 _fleet = build_fleet(n_devices=15, seed=1)
 
