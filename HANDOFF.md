@@ -110,7 +110,7 @@ numbers cannot: does high offline accuracy mean the model resists a
 motivated attacker? Answer: no. We measure how much, under three threat
 models, and test the standard defense against the same attacks.
 
-### Evaluation sample (fixed in v4 — all Track 1.5 numbers must be re-measured)
+### Evaluation sample (fixed in v4; all Track 1.5 numbers below are re-measured on it)
 
 **Bug found during the R3 work:** `adversarial_evasion.py` drew its 200
 attack samples from the WHOLE dataset (training rows included), while
@@ -127,9 +127,9 @@ tested). The defense script now attacks both models itself, on those
 samples, with the same seeds, under the permissive and strict tiers.
 Nothing is copied between scripts.
 
-**Every number in this Track 1.5 section that predates this fix is
-superseded.** Old values are kept below only so the change is
-traceable; do not cite them.
+All numbers below are from the rerun on the real Edge-IIoTset with the
+fixed held-out sample. Superseded values are kept only where noted, so
+the change is traceable; do not cite them.
 
 ### Attack: black-box feature-space evasion
 
@@ -142,8 +142,8 @@ classifier boundary.
 
 | | Value |
 |---|---|
-| Evasion, permissive, seed 42, held-out sample | **NOT MEASURED** (rerun pending) |
-| Superseded (mixed train/test sample) | 91.5% (183/200) |
+| Evasion, permissive, seed 42, held-out sample | **91.5% (183/200)** |
+| Superseded (mixed train/test sample) | 91.5% (183/200), a coincidentally identical count on a different sample |
 
 State the threat model explicitly: permissive feature space, the
 attacker may set ANY feature within its observed range, including
@@ -151,11 +151,13 @@ protocol-state fields such as `tcp.seq` / `tcp.ack`. Report it as the
 rate measured under this threat model, not as an upper bound and not
 as a practical attack. The constrained tiers below address this.
 
-**Citable detail (check it still holds after the rerun):** in the
-superseded run the most-exploited features (`tcp.ack_raw`, `tcp.ack`,
-`tcp.checksum`, `mqtt.hdrflags`, `tcp.seq`) were almost exactly the
-ones SHAP ranks most important globally (fig2): the features that give
-the model its explanatory power are also its main attack surface.
+**Citable detail (holds on the held-out rerun):** the most-exploited
+features are `tcp.seq` (96 of 183 evasions), `mqtt.hdrflags` (96),
+`tcp.checksum` (92), `tcp.ack` (91) and `tcp.ack_raw` (83), almost
+exactly the ones SHAP ranks most important globally (fig2): the
+features that give the model its explanatory power are also its main
+attack surface. Note that four of these five are frozen in the
+constrained tiers, and evasion still succeeds there (next section).
 
 Figure: `figures/fig8_adversarial_evasion.png`.
 
@@ -191,19 +193,25 @@ exactly (printed as a sanity check). Figure:
 `figures/fig11_constrained_evasion.png` (red = best known, gray =
 single run).
 
-| Tier | Single run (mean ± std) | Best known | Superseded run (mixed sample): single / best |
-|---|---|---|---|
-| permissive | NOT MEASURED | NOT MEASURED | 89.5% ± 1.5 / 100% |
-| protocol_constrained | NOT MEASURED | NOT MEASURED | 78.2% ± 2.1 / 100% |
-| strict | NOT MEASURED | NOT MEASURED | 83.0% ± 1.5 / 100% |
+| Tier | Single run (mean ± std, 3 seeds) | Best known (pooled) |
+|---|---|---|
+| permissive | 90.3% ± 1.3 | 100% (200/200) |
+| protocol_constrained | 77.8% ± 3.2 | 100% (200/200) |
+| strict | 83.3% ± 0.9 | 100% (200/200) |
 
-The superseded run already showed the qualitative answer to the
-reviewer: with three restarts, a strict-tier attacker evaded every
-blocked attack, so the vulnerability is not an artifact of the
-permissive threat model. Confirm it on the held-out sample before
-writing it. If the best-known bound saturates at 100% again, it cannot
-rank the tiers; say so, and do not present single-run differences as
-a constraint effect.
+Per-seed strict runs evaded 165, 169 and 166 of 200; their union
+covers all 200.
+
+**What this answers for the reviewer:** freezing every field a real
+sender cannot set (14 of 43 in the strict tier) does not protect the
+undefended model. With three search restarts, an attacker who changes
+only fields they control evaded all 200 blocked held-out attacks. The
+vulnerability is not an artifact of the permissive threat model.
+
+**What it does not show:** the best-known bound saturates at 100%, so
+it cannot rank the tiers. The single-run differences (90.3 / 77.8 /
+83.3) mostly reflect search efficiency; do not present them as
+"constraints reduce evasion by 12 points".
 
 ### Defense: adversarial training
 
@@ -216,26 +224,38 @@ metrics on the untouched test split for both models.
 
 | | Original model | + Adversarial training |
 |---|---|---|
-| Evasion, permissive (single run / best known) | NOT MEASURED | NOT MEASURED |
-| Evasion, strict (single run / best known) | NOT MEASURED | NOT MEASURED |
-| Clean-data F1 / accuracy | 0.9855 / 0.9751 (superseded run) | 0.9856 / 0.9754 (superseded run) |
-| Superseded headline (different samples, see above) | 91.5% | 28.0% |
+| Evasion, permissive, single run (mean ± std) | 90.3% ± 1.3 | **28.8% ± 0.6** |
+| Evasion, permissive, best known (3 restarts) | 100% | **55.0%** |
+| Evasion, strict, single run (mean ± std) | 83.3% ± 0.9 | **17.3% ± 2.2** |
+| Evasion, strict, best known (3 restarts) | 100% | **26.5%** |
+| Clean-data F1 / accuracy | 0.9855 / 0.9751 | 0.9856 / 0.9754 |
+| Clean-data recall | 0.9991 | 0.9994 |
 
-The clean-data metrics did not depend on the sampling bug, so they
-should reproduce; the evasion rows must be re-measured. When writing:
-- The defense was trained on permissive-attacker examples only. If it
-  helps much less against the strict attacker, report that plainly; it
-  is a real finding about adversarial training, not a failure to hide.
-- No clean-data decrease observed is "in this experiment", not "zero
-  cost". Whatever residual evasion remains after defense is an open
-  problem, not a solved one.
+All rows: the same 200 held-out attacks for both models, same search
+seeds (42, 43, 44). Superseded headline (different samples, see
+above): 91.5% → 28.0%.
+
+How to write it up:
+- **Single-run comparison:** 68.1% relative reduction (90.3% → 28.8%),
+  close to the superseded figure, now on a like-for-like basis.
+- **The single-run number flatters the defense.** An attacker allowed
+  three restarts still evades 55.0% of blocked attacks against the
+  defended model under the permissive threat model. Lead with the
+  best-known numbers, or report both; do not report 28.8% alone.
+- **The defense transfers to the realistic attacker:** although its
+  training examples came from the permissive attacker only, it cuts
+  strict-tier evasion from 100% to 26.5% (best known).
+- No clean-data decrease was observed in this experiment (one split,
+  one training run); say that, not "zero cost". Residual evasion
+  (26.5–55.0% with restarts) is an open problem, not a solved one.
 
 Figure: `figures/fig9_adversarial_defense.png` (left: evasion by tier,
 original vs defended; right: clean-data metrics).
 
-**Framing:** Track 1.5 is still a strong Discussion section (attack +
-realistic constraints + defense + honest residual risk), but its
-numbers come from the rerun, not from the superseded values.
+**Framing:** Track 1.5 is a strong Discussion section: the undefended
+model is fully evadable even by a protocol-constrained attacker;
+adversarial training helps substantially and transfers to that
+attacker, but a few restarts still recover a large share of evasions.
 
 Still not modelled, even in the strict tier: whether the perturbed
 traffic still achieves the attack's purpose, and consistency between
@@ -465,7 +485,7 @@ inflating the headline numbers:
 |---|---|---|
 | R1 | Track 1 and Track 2 not integrated; policy loop ignores the trained model | **Fixed in v4** — ML bridge + Experiment F (34.4% → 9.4% ASR, controlled) |
 | R2 | Single-node hash chain overclaimed as blockchain | Limitation 10 stated; wording in paper must follow it. Open option: periodic anchoring of the chain head to an external timestamping service |
-| R3 | Feature-space evasion may perturb fields an attacker cannot control | **Implemented** — three threat-model tiers (`src/adversarial_evasion_constrained.py`) and the defense evaluated under permissive and strict. A first real-data run showed a strict attacker with 3 restarts evading all 200 blocked attacks, but it used a mixed train/test sample (bug fixed in v4); held-out numbers NOT MEASURED until rerun |
+| R3 | Feature-space evasion may perturb fields an attacker cannot control | **Addressed** — three threat-model tiers on 200 held-out attacks. Undefended model: a strict-tier attacker (14 of 43 fields frozen) with 3 restarts evades all 200. Adversarial training cuts strict-tier evasion to 26.5% and permissive to 55.0% (best known); single-run figures 17.3% / 28.8% |
 | R4 | Only one scenario family; no out-of-distribution attacks or boundary cases | Open. Planned: hold out some attack classes from Red Agent generation and test hardened policies against them; add borderline legitimate workflows |
 | R5 | "Agent" undefined; components look like scripted modules | Open. Planned: an explicit definition (perceive → decide → act with state and a goal) and honest relabelling of components that do not meet it |
 
