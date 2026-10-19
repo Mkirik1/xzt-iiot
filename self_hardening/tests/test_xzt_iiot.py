@@ -140,6 +140,34 @@ class TestMLTrustIntegration:
         )
         assert differing > 0, "ML integration must change at least some trust scores"
 
+    def test_bridge_scores_are_not_constant(self):
+        """Regression test for the zero-fill bug: on real Edge-IIoTset
+        data the first bridge version gave every request the SAME
+        probability (0.963), because its synthesized rows matched none
+        of the model's features. Distinct scenarios must yield distinct
+        scores."""
+        from ml_trust_bridge import get_bridge, SCENARIO_TO_ATTACK_TYPE
+        bridge = get_bridge()
+        if bridge is None:
+            pytest.skip("Track-1 model not trained in this environment")
+        scores = {round(bridge.score_scenario(s, "PLC_CONTROLLER", f"{s}_{i}"), 6)
+                  for s in SCENARIO_TO_ATTACK_TYPE for i in range(10)}
+        assert len(scores) > 1, "bridge returned one constant score for every request"
+
+    def test_bridge_refuses_schema_mismatch_instead_of_zero_filling(self, tmp_path):
+        """If the held-out split lacks the model's features, the bridge
+        must fail loudly -- silently zero-filling is what produced the
+        constant-score bug."""
+        from ml_trust_bridge import MLTrustBridge, MODEL_PATH, TEST_SPLIT_PATH
+        if not (MODEL_PATH.exists() and TEST_SPLIT_PATH.exists()):
+            pytest.skip("Track-1 model not trained in this environment")
+        import pandas as pd
+        split = pd.read_csv(TEST_SPLIT_PATH, nrows=200)
+        broken = tmp_path / "test_split.csv"
+        split.drop(columns=[split.columns[0]]).to_csv(broken, index=False)
+        with pytest.raises(ValueError, match="missing"):
+            MLTrustBridge(MODEL_PATH, broken)
+
 
 # ---- ABAC decision ----
 

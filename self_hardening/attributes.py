@@ -24,9 +24,8 @@ class DeviceAttributes:
     device_id: str
     device_integrity: float        # 0..1
     patch_level: float             # 0..1 (not scored directly yet, kept for future use)
-    device_type: str = "PLC"       # used by ml_trust_bridge.py to synthesize a plausible
-                                    # traffic row for the Track-1 model; defaulted so existing
-                                    # callers that don't set it keep working unchanged
+    device_type: str = "PLC"       # descriptive only (not used in scoring); defaulted so
+                                    # existing callers that don't set it keep working unchanged
 
 
 @dataclass
