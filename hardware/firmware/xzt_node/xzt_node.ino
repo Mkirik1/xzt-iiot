@@ -43,7 +43,33 @@ const char* SENSOR_TOKEN = "lab-sensor-token-change-me";   // must match devices
 const char* SENSOR_FW_MD5_COPY = "paste-sensor-md5-here";
 // ==========================================================
 
-#include <WiFi.h>
+// Relay module: look at it. With an H/L jumper set to H, or a module that
+// says "high level trigger": leave false. A module that switches ON when
+// IN goes LOW (most blue single-relay boards without a jumper): set true.
+// Then "off" releases the pin (input mode) instead of driving 3.3 V,
+// because 3.3 V is often not enough to switch a 5 V low-trigger module off.
+const bool RELAY_ACTIVE_LOW = false;
+// Buzzer module: tone() makes both kinds sound (active and passive).
+// Set true only if the module beeps the whole time while idle.
+const bool BUZZER_ACTIVE_LOW = false;
+
+// Works on ESP32 (DevKit) and ESP8266 (NodeMCU, Wemos D1 mini): pick the
+// board in Arduino IDE, the right Wi-Fi library and pins follow.
+// Device IDs stay "esp32_*" on both, so the gateway's devices.yaml is the same.
+#if defined(ESP8266)
+  #include <ESP8266WiFi.h>
+  // NodeMCU labels: D1=GPIO5 D2=GPIO4 D5=GPIO14 D6=GPIO12 D7=GPIO13.
+  // D3, D4, D8 are avoided: they decide how the chip boots.
+  #define P_D1 5
+  #define P_D2 4
+  #define P_D5 14
+  #define P_D6 12
+  #define P_D7 13
+  const int PIN_ONBOARD_LED = 2;  const bool ONBOARD_LED_ACTIVE_LOW = true;
+#else
+  #include <WiFi.h>
+  const int PIN_ONBOARD_LED = 2;  const bool ONBOARD_LED_ACTIVE_LOW = false;
+#endif
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
@@ -51,32 +77,38 @@ const char* SENSOR_FW_MD5_COPY = "paste-sensor-md5-here";
   #include <OneWire.h>
   #include <DallasTemperature.h>
   const char* DEVICE_ID = "esp32_sensor";
-  const int PIN_TEMP = 4;       // DS18B20 data, 4.7k pull-up to 3V3
-  const int PIN_BTN_A = 18;     // to GND, internal pull-up
-  const int PIN_BTN_B = 19;
+  #if defined(ESP8266)
+    const int PIN_TEMP = P_D2, PIN_BTN_A = P_D5, PIN_BTN_B = P_D6;
+  #else
+    const int PIN_TEMP = 4, PIN_BTN_A = 18, PIN_BTN_B = 19;
+  #endif
+  // DS18B20 data needs a 4.7k pull-up to 3V3 (already on the small adapter
+  // board that comes with most probes). Buttons go to GND, internal pull-up.
   OneWire oneWire(PIN_TEMP);
   DallasTemperature temps(&oneWire);
 #elif ROLE == ROLE_ACTUATOR
   const char* DEVICE_ID = "esp32_actuator";
-  const int PIN_RELAY = 23;
-  // Use a relay module whose trigger jumper is set to HIGH (or a 3.3 V
-  // module): then HIGH = on and this stays false. Set true only for a
-  // low-level-trigger module that switches reliably from 3.3 V.
-  const bool RELAY_ACTIVE_LOW = false;
-  const int PIN_GREEN = 25, PIN_YELLOW = 26, PIN_RED = 27, PIN_BUZZER = 14;  // LEDs via 220 ohm
-  const bool BUZZER_ACTIVE_LOW = false;  // some 3-pin buzzer modules sound on LOW: set true then
+  #if defined(ESP8266)
+    const int PIN_RELAY = P_D1, PIN_GREEN = P_D5, PIN_YELLOW = P_D6, PIN_RED = P_D7, PIN_BUZZER = P_D2;
+  #else
+    const int PIN_RELAY = 23, PIN_GREEN = 25, PIN_YELLOW = 26, PIN_RED = 27, PIN_BUZZER = 14;
+  #endif
+  // LEDs each through a 220 ohm (100 ohm .. 1 kohm is fine) resistor to GND.
 #else
   const char* DEVICE_ID = "esp32_attacker";
-  const int BTN[5] = {18, 19, 32, 33, 13};   // scenarios A..E, to GND
+  #if defined(ESP8266)
+    const int BTN[5] = {P_D1, P_D2, P_D5, P_D6, P_D7};   // scenarios A..E, to GND
+  #else
+    const int BTN[5] = {18, 19, 32, 33, 13};
+  #endif
 #endif
-
-const int PIN_ONBOARD_LED = 2;
 WiFiClient net;
 PubSubClient mqtt(net);
 String fwMd5;
 bool pumpOn = false;
 
-void blink(int ms) { digitalWrite(PIN_ONBOARD_LED, HIGH); delay(ms); digitalWrite(PIN_ONBOARD_LED, LOW); }
+void led(bool on) { digitalWrite(PIN_ONBOARD_LED, (on ^ ONBOARD_LED_ACTIVE_LOW) ? HIGH : LOW); }
+void blink(int ms) { led(true); delay(ms); led(false); }
 
 void connectWifi() {
   WiFi.mode(WIFI_STA);
@@ -102,11 +134,20 @@ void sendRequest(const char* asDevice, const char* token, const char* fw, const 
 #if ROLE == ROLE_ACTUATOR
 void setPump(bool on) {
   pumpOn = on;
-  digitalWrite(PIN_RELAY, (on ^ RELAY_ACTIVE_LOW) ? HIGH : LOW);
+  if (RELAY_ACTIVE_LOW) {
+    if (on) { pinMode(PIN_RELAY, OUTPUT); digitalWrite(PIN_RELAY, LOW); }
+    else    { pinMode(PIN_RELAY, INPUT); }          // released: module pulls IN up = off
+  } else {
+    pinMode(PIN_RELAY, OUTPUT);
+    digitalWrite(PIN_RELAY, on ? HIGH : LOW);
+  }
   Serial.printf("PUMP %s\n", on ? "ON" : "OFF");
 }
 
-void buzz(bool on) { digitalWrite(PIN_BUZZER, (on ^ BUZZER_ACTIVE_LOW) ? HIGH : LOW); }
+void buzz(bool on) {
+  if (BUZZER_ACTIVE_LOW) { digitalWrite(PIN_BUZZER, on ? LOW : HIGH); return; }
+  if (on) tone(PIN_BUZZER, 2500); else { noTone(PIN_BUZZER); digitalWrite(PIN_BUZZER, LOW); }
+}
 
 void showDecision(const char* d) {
   digitalWrite(PIN_GREEN, LOW); digitalWrite(PIN_YELLOW, LOW); digitalWrite(PIN_RED, LOW);
@@ -165,14 +206,14 @@ bool pressed(int pin) {               // simple debounce, active LOW
 
 void setup() {
   Serial.begin(115200);
-  pinMode(PIN_ONBOARD_LED, OUTPUT);
+  pinMode(PIN_ONBOARD_LED, OUTPUT); led(false);
   fwMd5 = ESP.getSketchMD5();
   Serial.printf("\n%s  firmware MD5 = %s\n", DEVICE_ID, fwMd5.c_str());
 #if ROLE == ROLE_SENSOR
   pinMode(PIN_BTN_A, INPUT_PULLUP); pinMode(PIN_BTN_B, INPUT_PULLUP);
   temps.begin();
 #elif ROLE == ROLE_ACTUATOR
-  pinMode(PIN_RELAY, OUTPUT); setPump(false);
+  setPump(false);
   pinMode(PIN_GREEN, OUTPUT); pinMode(PIN_YELLOW, OUTPUT); pinMode(PIN_RED, OUTPUT);
   pinMode(PIN_BUZZER, OUTPUT); buzz(false);
 #else
